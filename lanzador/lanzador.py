@@ -258,10 +258,15 @@ def quitar_de_este_equipo(borrar_datos=True):
             pass
         for csidl in (0x10, 0x02):  # escritorio y menú Inicio
             (carpeta_especial(csidl) / f"{APP}.lnk").unlink(missing_ok=True)
-        orden = f'timeout /t 3 /nobreak >nul & rmdir /s /q "{INSTALACION}"'
-        if borrar_datos:
-            orden += f' & rmdir /s /q "{DATOS}"'
-        subprocess.Popen(["cmd", "/c", orden], creationflags=SIN_VENTANA, cwd=str(Path.home()))
+        # Las carpetas se borran cuando este proceso termina (su .exe está en uso hasta entonces).
+        carpetas = [INSTALACION] + ([DATOS] if borrar_datos else [])
+        lista = ",".join("'" + str(c).replace("'", "''") + "'" for c in carpetas)
+        orden = (f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue; Start-Sleep 2; "
+                 f"foreach ($i in 1..10) {{ Remove-Item -LiteralPath {lista} -Recurse -Force "
+                 f"-ErrorAction SilentlyContinue; if (-not (Test-Path -LiteralPath {lista})) {{ break }}; "
+                 f"Start-Sleep 3 }}")
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", orden],
+                         creationflags=SIN_VENTANA, cwd=str(Path.home()))
         return
     # Cierra las otras copias (motor y su Chromium), pero no a este mismo proceso.
     r = subprocess.run(["pgrep", "-f", str(INSTALACION)], capture_output=True, text=True)
@@ -288,10 +293,16 @@ def autodestruir():
     texto = mensaje_servidor() or "El administrador desactivó Vigilante MEC."
     quitar_de_este_equipo(borrar_datos=True)
     try:
+        # Aviso que se cierra solo a los 15 s, por si nadie está frente al equipo.
         import tkinter as tk
-        from tkinter import messagebox
-        tk.Tk().withdraw()
-        messagebox.showinfo(APP, f"{texto}\n\nLa app se quitó de este equipo.")
+        raiz = tk.Tk()
+        raiz.title(APP)
+        raiz.attributes("-topmost", True)
+        tk.Label(raiz, text=f"{texto}\n\nLa app se quitó de este equipo.", padx=24, pady=18,
+                 justify="left").pack()
+        tk.Button(raiz, text="Aceptar", width=12, command=raiz.destroy).pack(pady=(0, 14))
+        raiz.after(15000, raiz.destroy)
+        raiz.mainloop()
     except Exception:
         pass
     os._exit(0)
