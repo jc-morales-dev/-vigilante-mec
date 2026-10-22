@@ -86,6 +86,7 @@ def cargar_config():
     cfg.setdefault("chats_avisos", [])
     cfg.setdefault("chat_dueno", (cfg["chats_avisos"] or [""])[0])
     cfg.setdefault("rol", "principal")
+    cfg.setdefault("telegram_activo", True)
     cfg.setdefault("url_agenda", "")
     cfg.setdefault("texto_ubicacion", "Oficina Reguladora")
     cfg.setdefault("meses_a_vigilar", 5)
@@ -124,6 +125,9 @@ def telegram(cfg, metodo, datos=None):
 
 
 def enviar(cfg, destinos, texto):
+    if not cfg["telegram_activo"]:
+        log("(Telegram desactivado en este equipo) " + texto)
+        return False
     if not cfg.get("telegram_token") or not destinos:
         log("(Telegram sin configurar) " + texto)
         return False
@@ -165,17 +169,23 @@ def principal_vivo(cfg):
 
 
 def dejar_latido(cfg):
-    """El principal deja 'vivo <hora>' en el bot, en segundo plano para no frenar la vigilancia."""
+    """El principal deja 'vivo <hora>' en el bot, en segundo plano para no frenar la vigilancia.
+
+    Con Telegram desactivado deja 'mudo <hora>' (una vez): el respaldo toma el relevo enseguida.
+    """
     if cfg["rol"] != "principal" or not cfg.get("telegram_token"):
+        return
+    if not cfg["telegram_activo"] and _latido["escrito"]:
         return
     if time.time() - _latido["escrito"] < LATIDO_CADA:
         return
     _latido["escrito"] = time.time()
+    estado = "vivo" if cfg["telegram_activo"] else "mudo"
 
     def tarea():
         try:
             telegram(cfg, "setMyShortDescription",
-                     {"short_description": f"vivo {int(time.time())}", "language_code": IDIOMA_LATIDO})
+                     {"short_description": f"{estado} {int(time.time())}", "language_code": IDIOMA_LATIDO})
         except Exception as e:
             log(f"No pude dejar la señal de vida: {error_corto(e)}")
     threading.Thread(target=tarea, daemon=True).start()
@@ -559,7 +569,9 @@ def main():
 
         esperar_login(page, cfg)
         avisar(cfg, "✅ Bot activado")
-        log(f"Rol de este PC: {cfg['rol']}.")
+        log(f"Rol de este PC: {cfg['rol']}."
+            + ("" if cfg["telegram_activo"] else " Telegram desactivado en este equipo: avisa el otro PC."))
+        dejar_latido(cfg)
 
         ultimo_latido = time.time()
         ultimo_aviso_cupo = 0.0

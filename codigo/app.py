@@ -74,7 +74,7 @@ def main(lz, auto=False):
     motor = Motor(lz)
     raiz = tk.Tk()
     raiz.title(f"{APP} — versión {lz.version_codigo()}")
-    raiz.geometry("760x620")
+    raiz.geometry("760x650")
     raiz.minsize(620, 500)
     for icono in (lz.carpeta_codigo() / "icono.png", lz.RECURSOS / "icono.png"):
         try:
@@ -161,6 +161,7 @@ def main(lz, auto=False):
     v_url = tk.StringVar(value=cfg.get("url_agenda", ""))
     v_auto = tk.BooleanVar(value=bool(cfg.get("encender_al_abrir", True)))
     v_arranque = tk.BooleanVar(value=lz.arranque_activado())
+    v_telegram = tk.BooleanVar(value=bool(cfg.get("telegram_activo", True)))
 
     ttk.Label(marco, text="Trámite en Agenda:").grid(row=0, column=0, sticky="w")
     ttk.Entry(marco, textvariable=v_url).grid(row=0, column=1, columnspan=3, sticky="ew", pady=2)
@@ -170,15 +171,21 @@ def main(lz, auto=False):
         row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
     ttk.Checkbutton(marco, text="Abrir la app al iniciar el " + ("Windows" if lz.ES_WINDOWS else "equipo"),
                     variable=v_arranque).grid(row=3, column=0, columnspan=2, sticky="w")
+    ttk.Checkbutton(marco, text="Enviar avisos a Telegram desde este equipo (si lo quitas, avisa el otro PC)",
+                    variable=v_telegram).grid(row=4, column=0, columnspan=4, sticky="w")
     txt_token = ttk.Label(marco)
-    txt_token.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    txt_token.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     def refrescar_token():
         c = leer_config(lz)
-        ok = bool(c.get("telegram_token"))
+        if not c.get("telegram_token"):
+            tg = "Telegram: FALTA el token"
+        elif not c.get("telegram_activo", True):
+            tg = "Telegram: DESACTIVADO en este equipo"
+        else:
+            tg = "Telegram: activo ✓"
         rol = "principal" if c.get("rol", "principal") == "principal" else "respaldo"
-        txt_token.configure(text=("Telegram: configurado ✓" if ok else "Telegram: FALTA el token")
-                            + f"   ·   Este equipo es el {rol}")
+        txt_token.configure(text=f"{tg}   ·   Este equipo es el {rol}")
 
     def cambiar_token():
         nuevo = simpledialog.askstring(APP, "Pega el token del bot de Telegram:", show="*", parent=raiz)
@@ -195,8 +202,13 @@ def main(lz, auto=False):
             messagebox.showerror(APP, "El enlace del trámite debe ser de https://bpmgob.mec.gub.uy/etapas/ejecutar/…")
             return
         c = leer_config(lz)
-        c.update(url_agenda=url, encender_al_abrir=bool(v_auto.get()))
+        if c.get("telegram_activo", True) and not v_telegram.get() and not messagebox.askyesno(
+                APP, "Este equipo dejará de mandar avisos a Telegram.\n\nLos avisos los mandará el otro PC, "
+                     "así que asegúrate de que esté encendido y vigilando. ¿Seguir?"):
+            return
+        c.update(url_agenda=url, encender_al_abrir=bool(v_auto.get()), telegram_activo=bool(v_telegram.get()))
         guardar_config(lz, c)
+        refrescar_token()
         try:
             lz.fijar_arranque(bool(v_arranque.get()))
         except Exception as e:
@@ -209,8 +221,8 @@ def main(lz, auto=False):
             motor.apagar()
             encender()
 
-    ttk.Button(marco, text="Cambiar token…", command=cambiar_token).grid(row=4, column=2, sticky="e", pady=(6, 0))
-    ttk.Button(marco, text="Guardar", command=guardar).grid(row=4, column=3, sticky="e", padx=(6, 0), pady=(6, 0))
+    ttk.Button(marco, text="Cambiar token…", command=cambiar_token).grid(row=5, column=2, sticky="e", pady=(6, 0))
+    ttk.Button(marco, text="Guardar", command=guardar).grid(row=5, column=3, sticky="e", padx=(6, 0), pady=(6, 0))
     refrescar_token()
 
     # --- Registro
