@@ -54,6 +54,14 @@ def publicar(version=None):
     version = version or siguiente(man.get("version_codigo", "0.0.0"))
     for nombre in ("app.py", "motor.py"):
         compile((CODIGO / nombre).read_text(encoding="utf-8"), nombre, "exec")  # no publicar código roto
+    # Ni código que use módulos que la app instalada no trae (la ventana no abriría).
+    sys.path.insert(0, str(RAIZ / "herramientas"))
+    import comprobar_modulos
+    exe = comprobar_modulos.EXE
+    if not exe.exists():
+        exe = Path.home() / "AppData" / "Local" / "Programs" / "VigilanteMEC" / "VigilanteMEC.exe"
+    if not comprobar_modulos.comprobar(exe):
+        sys.exit("No se publicó nada.")
     (CODIGO / "VERSION").write_text(version + "\n", encoding="utf-8")
     PAQUETES.mkdir(exist_ok=True)
     paquete = PAQUETES / f"codigo-{version}.zip"

@@ -96,8 +96,9 @@ class Motor:
 
 
 def main(lz, auto=False):
+    # Solo módulos que trae el lanzador instalado (tkinter.font, por ejemplo, no viene en la v1).
     import tkinter as tk
-    from tkinter import font as tkfont, messagebox, simpledialog
+    from tkinter import messagebox, simpledialog
 
     motor = Motor(lz)
     raiz = tk.Tk()
@@ -114,7 +115,7 @@ def main(lz, auto=False):
         except Exception:
             pass
 
-    familias = set(tkfont.families())
+    familias = set(raiz.tk.splitlist(raiz.tk.call("font", "families")))
     letra = next((f for f in ("Segoe UI", "Ubuntu", "Cantarell", "DejaVu Sans") if f in familias), "TkDefaultFont")
     mono = next((f for f in ("Consolas", "DejaVu Sans Mono", "Ubuntu Mono") if f in familias), "TkFixedFont")
 

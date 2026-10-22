@@ -1,9 +1,9 @@
 {
   "activo": true,
-  "version_codigo": "1.1.0",
+  "version_codigo": "1.1.1",
   "lanzador_minimo": 1,
   "ajustes": {},
-  "sha256": "f52c6fcf2801f2830d2a1b3684a8091389f7beb2d89f23e4a1be4c4599c8e831",
-  "codigo_url": "https://raw.githubusercontent.com/jc-morales-dev/-vigilante-mec/main/paquetes/codigo-1.1.0.zip",
-  "actualizado": "2026-10-22 02:46:33"
+  "sha256": "5f76bf756e31f1e317e52d997812b0e526b49815909b91925c703ea7fbe1ea3b",
+  "codigo_url": "https://raw.githubusercontent.com/jc-morales-dev/-vigilante-mec/main/paquetes/codigo-1.1.1.zip",
+  "actualizado": "2026-10-22 02:49:34"
 }
