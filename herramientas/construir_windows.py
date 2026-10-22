@@ -11,6 +11,14 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 CONSTRUIR = RAIZ / "build"
+# Módulos extra para que las actualizaciones del código puedan usarlos sin reinstalar
+# (la misma lista está en .github/workflows/linux.yml).
+EXTRA = ["--collect-submodules", "tkinter", "--collect-submodules", "email", "--collect-submodules", "http",
+         "--collect-submodules", "urllib", "--collect-submodules", "json", "--collect-submodules", "html",
+         "--collect-submodules", "xml", "--collect-submodules", "concurrent"]
+for m in ("csv", "uuid", "zoneinfo", "statistics", "dataclasses", "base64", "hashlib", "secrets", "shlex",
+          "textwrap", "difflib", "calendar", "locale", "platform", "webbrowser", "queue", "socket", "ssl"):
+    EXTRA += ["--hidden-import", m]
 
 
 def pyinstaller(*args):
@@ -29,7 +37,7 @@ def main(persona):
                 "--distpath", str(CONSTRUIR / "dist"),
                 "--add-data", f"{RAIZ / 'codigo'};codigo", "--add-data", f"{icono_png};.",
                 "--paths", str(RAIZ / "codigo"), "--hidden-import", "app", "--hidden-import", "motor",
-                str(RAIZ / "lanzador" / "lanzador.py"))
+                *EXTRA, str(RAIZ / "lanzador" / "lanzador.py"))
 
     app_zip = CONSTRUIR / "app.zip"
     origen = CONSTRUIR / "dist" / "VigilanteMEC"

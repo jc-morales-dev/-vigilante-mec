@@ -31,11 +31,21 @@ jobs:
       - name: Construir
         run: |
           python lanzador/hacer_icono.py
+          # Módulos extra para que las actualizaciones del código puedan usarlos sin reinstalar
+          # (la misma lista está en herramientas/construir_windows.py).
+          EXTRA="--collect-submodules tkinter --collect-submodules email --collect-submodules http \
+            --collect-submodules urllib --collect-submodules json --collect-submodules html \
+            --collect-submodules xml --collect-submodules concurrent"
+          for m in csv uuid zoneinfo statistics dataclasses base64 hashlib secrets shlex textwrap difflib \
+                   calendar locale platform webbrowser queue socket ssl; do EXTRA="$EXTRA --hidden-import $m"; done
           pyinstaller --noconfirm --clean --windowed --name vigilante-mec \
             --add-data "codigo:codigo" --add-data "codigo/icono.png:." \
-            --paths codigo --hidden-import app --hidden-import motor \
+            --paths codigo --hidden-import app --hidden-import motor $EXTRA \
             lanzador/lanzador.py
           tar -czf vigilante-mec-linux-x86_64.tar.gz -C dist vigilante-mec
+          # Instalador con ventana (genérico: los datos de cada persona van en config.vmec al lado).
+          pyinstaller --noconfirm --onefile --windowed --name instalar-vigilante-mec lanzador/instalador_linux.py
+          cp dist/instalar-vigilante-mec instalar-vigilante-mec-linux-x86_64
 
       - name: Probar en un Linux limpio (bajar Chromium y abrirlo)
         env:
@@ -52,7 +62,18 @@ jobs:
         run: |
           gh release view lanzador-v1 >/dev/null 2>&1 || \
             gh release create lanzador-v1 --title "Lanzador Linux v1" --notes "App Vigilante MEC para Linux (x86_64)."
-          gh release upload lanzador-v1 vigilante-mec-linux-x86_64.tar.gz --clobber
+          gh release upload lanzador-v1 vigilante-mec-linux-x86_64.tar.gz instalar-vigilante-mec-linux-x86_64 --clobber
+
+      - name: Probar el instalador con ventana (en modo consola, con una config falsa)
+        run: |
+          rm -rf "$HOME/.local/share/vigilante-mec" "$HOME/.local/share/applications/vigilante-mec.desktop"
+          mkdir -p /tmp/jose
+          cp instalar-vigilante-mec-linux-x86_64 "/tmp/jose/Instalar Vigilante MEC"
+          echo '{"telegram_token": "", "chats_avisos": [], "chat_dueno": "", "rol": "respaldo"}' | base64 -w0 > /tmp/jose/config.vmec
+          xvfb-run -a "/tmp/jose/Instalar Vigilante MEC" --sin-ventana --acepto | tee instalador2.txt
+          grep -q INSTALADOR_OK instalador2.txt
+          test -x "$HOME/.local/share/vigilante-mec/app/vigilante-mec"
+          test -f "$HOME/.local/share/applications/vigilante-mec.desktop"
 
       - name: Probar el instalador de Linux completo (con una config falsa)
         run: |

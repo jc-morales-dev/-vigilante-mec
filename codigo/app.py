@@ -206,6 +206,7 @@ def main(lz, auto=False):
     b_principal.pack()
 
     def alternar():
+        lz.registrar("Botón " + ("APAGAR" if estado["encendido"] else "ENCENDER") + " pulsado en la ventana.")
         apagar() if estado["encendido"] else encender()
 
     def encender():

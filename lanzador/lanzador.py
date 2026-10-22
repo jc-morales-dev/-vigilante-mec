@@ -100,10 +100,26 @@ def leer_manifest():
     return None
 
 
+def versiones_malas():
+    try:
+        return set((CODIGO / "malas.txt").read_text(encoding="utf-8").split())
+    except OSError:
+        return set()
+
+
+def descartar_version_actual(error):
+    """El código bajado no arrancó: se marca como malo y se vuelve al que trae la instalación."""
+    v = version_codigo()
+    registrar(f"La versión {v} no arrancó ({error}); vuelvo a la versión incluida en la app.")
+    with (CODIGO / "malas.txt").open("a", encoding="utf-8") as f:
+        f.write(v + "\n")
+    (CODIGO / "actual.txt").unlink(missing_ok=True)
+
+
 def bajar_codigo(man):
     """Baja y prepara el código nuevo si lo hay. True si cambió."""
     nueva = str(man.get("version_codigo", "0"))
-    if version_tupla(nueva) <= version_tupla(version_codigo()):
+    if version_tupla(nueva) <= version_tupla(version_codigo()) or nueva in versiones_malas():
         return False
     if int(man.get("lanzador_minimo", 1)) > LANZADOR_VERSION:
         return False
@@ -395,7 +411,14 @@ def main():
 
     if revisar_servidor() == "eliminar":
         autodestruir()
-    cargar("app").main(sys.modules[__name__], auto="--auto" in argv)
+    try:
+        cargar("app").main(sys.modules[__name__], auto="--auto" in argv)
+    except Exception as e:
+        if carpeta_codigo() == RECURSOS / "codigo":
+            raise  # ya es la versión incluida: no hay a dónde volver
+        descartar_version_actual(f"{type(e).__name__}: {str(e)[:150]}")
+        candado.close()
+        reiniciar(*argv)
     candado.close()
 
 

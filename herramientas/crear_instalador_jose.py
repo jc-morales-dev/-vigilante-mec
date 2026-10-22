@@ -1,17 +1,39 @@
-"""Genera privado/instalar_vigilante_jose.sh: instalador de Linux con la config de José ya dentro.
+"""Genera los instaladores de Linux para José, con su config dentro. Llevan el token del bot:
+mándaselos por privado, nunca los subas al servidor.
 
-Ese archivo lleva el token del bot: mándaselo a José por privado, nunca lo subas al servidor.
+  privado/Vigilante-MEC-Jose.tar.gz       instalador con ventana (doble clic, sin comandos)
+  privado/instalar_vigilante_jose.sh      alternativa por terminal:  bash instalar_vigilante_jose.sh
 """
 import base64
+import io
 import json
 import sys
+import tarfile
+import time
+import urllib.request
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 REPO = "jc-morales-dev/-vigilante-mec"
-URL_LINUX = f"https://github.com/{REPO}/releases/download/lanzador-v1/vigilante-mec-linux-x86_64.tar.gz"
+BASE_RELEASE = f"https://github.com/{REPO}/releases/download/lanzador-v1"
+URL_LINUX = f"{BASE_RELEASE}/vigilante-mec-linux-x86_64.tar.gz"
+URL_INSTALADOR = f"{BASE_RELEASE}/instalar-vigilante-mec-linux-x86_64"
 CONFIG = RAIZ / "privado" / "config_jose.json"
 SALIDA = RAIZ / "privado" / "instalar_vigilante_jose.sh"
+PAQUETE = RAIZ / "privado" / "Vigilante-MEC-Jose.tar.gz"
+LEEME = """VIGILANTE MEC - cómo instalarlo
+
+1. Haz doble clic en "Instalar Vigilante MEC".
+   (Si no se abre: clic derecho > Propiedades > Permisos > marca "Permitir ejecutar
+   el archivo como un programa", o clic derecho > "Ejecutar como un programa".)
+2. Lee el aviso, marca "Lo entiendo y acepto" y pulsa Instalar.
+3. Espera a que termine (si no tienes Chrome, lo baja solo).
+4. La primera vez, inicia sesión en el MEC en la ventana de Chrome que se abre
+   y abre tu trámite hasta el paso Agenda. Desde ahí sigue sola.
+
+Después la encuentras como "Vigilante MEC" en el escritorio y en el menú de aplicaciones.
+No compartas estos archivos: llevan datos privados.
+"""
 
 PLANTILLA = r'''#!/usr/bin/env bash
 # Instalador de Vigilante MEC (Linux). Uso:  bash instalar_vigilante_jose.sh
@@ -108,15 +130,40 @@ echo "La primera vez inicia sesión en el MEC en la ventana de Chrome que se abr
 '''
 
 
-def main(config=CONFIG, salida=SALIDA):
+def agregar(tar, nombre, datos, modo):
+    info = tarfile.TarInfo(nombre)
+    info.size = len(datos)
+    info.mode = modo
+    info.mtime = int(time.time())
+    tar.addfile(info, io.BytesIO(datos))
+
+
+def main(config=CONFIG, salida=SALIDA, paquete=PAQUETE):
     cfg = json.loads(Path(config).read_text(encoding="utf-8"))
     datos = base64.b64encode(json.dumps(cfg, ensure_ascii=False).encode("utf-8")).decode("ascii")
+
     texto = PLANTILLA.replace("__URL__", URL_LINUX).replace("__CONFIG__", datos)
     Path(salida).parent.mkdir(parents=True, exist_ok=True)
     Path(salida).write_bytes(texto.encode("utf-8"))  # saltos de línea de Linux
-    print(f"Listo: {salida}\nMándaselo a José por privado. Él lo ejecuta con:  bash instalar_vigilante_jose.sh")
+    print(f"Listo: {salida}")
+
+    if paquete:
+        with urllib.request.urlopen(URL_INSTALADOR, timeout=120) as r:
+            instalador = r.read()
+        with tarfile.open(paquete, "w:gz") as tar:
+            carpeta = tarfile.TarInfo("Vigilante MEC")
+            carpeta.type, carpeta.mode, carpeta.mtime = tarfile.DIRTYPE, 0o755, int(time.time())
+            tar.addfile(carpeta)
+            agregar(tar, "Vigilante MEC/Instalar Vigilante MEC", instalador, 0o755)
+            agregar(tar, "Vigilante MEC/config.vmec", datos.encode("ascii"), 0o600)
+            agregar(tar, "Vigilante MEC/LEEME.txt", LEEME.encode("utf-8"), 0o644)
+        print(f"Listo: {paquete}")
+    print("Mándaselo a José por privado.")
 
 
 if __name__ == "__main__":
     # Opcional: config y salida propias (lo usa la prueba automática con una config falsa).
-    main(*sys.argv[1:3])
+    if len(sys.argv) > 1:
+        main(sys.argv[1], sys.argv[2], None)
+    else:
+        main()
