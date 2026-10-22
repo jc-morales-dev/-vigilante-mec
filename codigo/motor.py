@@ -331,12 +331,15 @@ def sesion_iniciada(page):
     if not page.url.startswith(MEC):
         return False
     try:
-        return not page.evaluate(
-            """() => /Uso de la aplicación no permitida/i.test(document.body.innerText)
-                  || !!document.querySelector('a[href*="autenticacion/login"]')"""
+        fuera = page.evaluate(
+            """() => /Uso de la aplicación no permitida/i.test(document.body.innerText) ? 'no permitida'
+                  : document.querySelector('a[href*="autenticacion/login"]') ? 'enlace de login' : ''"""
         )
-    except Exception:
-        return False
+    except Exception as e:
+        fuera = error_corto(e)
+    if fuera:
+        log(f"Sin sesión del MEC ({fuera}).")
+    return not fuera
 
 
 def buscar_agenda(page, cfg):
@@ -372,7 +375,11 @@ def esperar_login(page, cfg):
         return
     log("Esperando a que inicies sesión en la ventana de Chrome del vigilante...")
     ultima_url, ultimo_cambio, ultima_busqueda, avisado = page.url, time.time(), 0.0, False
+    ultimo_estado = 0.0
     while True:
+        if time.time() - ultimo_estado > 300:
+            ultimo_estado = time.time()
+            log(f"Esperando sesión/trámite (la ventana está en {page.url.split('?')[0]})")
         # No recarga mientras la persona escribe o navega; solo comprueba cada 5 s.
         time.sleep(5)
         if en_agenda(page, cfg):
