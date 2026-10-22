@@ -171,8 +171,12 @@ def main(lz, auto=False):
         row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
     ttk.Checkbutton(marco, text="Abrir la app al iniciar el " + ("Windows" if lz.ES_WINDOWS else "equipo"),
                     variable=v_arranque).grid(row=3, column=0, columnspan=2, sticky="w")
-    ttk.Checkbutton(marco, text="Enviar avisos a Telegram desde este equipo (si lo quitas, avisa el otro PC)",
-                    variable=v_telegram).grid(row=4, column=0, columnspan=4, sticky="w")
+    if cfg.get("rol", "principal") == "principal":
+        # Solo el principal puede callarse: el respaldo es justamente quien avisa cuando el principal no lo hace.
+        ttk.Checkbutton(marco, text="Enviar avisos a Telegram desde este equipo (si lo quitas, avisa el otro PC)",
+                        variable=v_telegram).grid(row=4, column=0, columnspan=4, sticky="w")
+    else:
+        v_telegram.set(True)
     txt_token = ttk.Label(marco)
     txt_token.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
