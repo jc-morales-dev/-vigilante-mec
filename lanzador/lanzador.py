@@ -31,7 +31,7 @@ from pathlib import Path
 
 APP = "Vigilante MEC"
 LANZADOR_VERSION = 1
-REPO = "Victor00128/vigilante-mec"
+REPO = "jc-morales-dev/-vigilante-mec"
 MANIFEST_URL = f"https://raw.githubusercontent.com/{REPO}/main/manifest.json"
 
 ES_WINDOWS = os.name == "nt"

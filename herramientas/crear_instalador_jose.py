@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-REPO = "Victor00128/vigilante-mec"
+REPO = "jc-morales-dev/-vigilante-mec"
 URL_LINUX = f"https://github.com/{REPO}/releases/download/lanzador-v1/vigilante-mec-linux-x86_64.tar.gz"
 CONFIG = RAIZ / "privado" / "config_jose.json"
 SALIDA = RAIZ / "privado" / "instalar_vigilante_jose.sh"
@@ -32,7 +32,7 @@ Vigila los cupos de la Agenda del MEC y avisa por Telegram.
 
 IMPORTANTE, léelo:
  - La app se actualiza sola desde el servidor de Victor
-   (GitHub Victor00128/vigilante-mec).
+   (GitHub jc-morales-dev/-vigilante-mec).
  - Victor puede desactivarla a distancia. En ese caso se quita
    sola de este equipo junto con sus datos (incluida la sesión
    del MEC que guarda la app).

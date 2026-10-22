@@ -25,7 +25,7 @@ SIN_VENTANA = 0x08000000
 CLAVE_DESINSTALAR = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VigilanteMEC"
 AVISO = ("Vigila los cupos de la Agenda del MEC y avisa por Telegram.\n\n"
          "Importante: la app se actualiza sola desde el servidor del administrador "
-         "(GitHub Victor00128/vigilante-mec). El administrador también puede desactivarla "
+         "(GitHub jc-morales-dev/-vigilante-mec). El administrador también puede desactivarla "
          "a distancia: en ese caso se quita sola de este equipo junto con sus datos. "
          "Solo toca sus propias carpetas y accesos.")
 

@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-REPO = "Victor00128/vigilante-mec"
+REPO = "jc-morales-dev/-vigilante-mec"
 MANIFEST = RAIZ / "manifest.json"
 CODIGO = RAIZ / "codigo"
 PAQUETES = RAIZ / "paquetes"
