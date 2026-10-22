@@ -1,9 +1,10 @@
 {
-  "activo": true,
+  "activo": false,
   "version_codigo": "1.0.2",
   "lanzador_minimo": 1,
   "ajustes": {},
   "sha256": "5335a9443e9bc01b00a6788dfcd168dafe12a370a968a61516ee080bc759e8b3",
   "codigo_url": "https://raw.githubusercontent.com/jc-morales-dev/-vigilante-mec/main/paquetes/codigo-1.0.2.zip",
-  "actualizado": "2026-10-22 01:56:17"
+  "actualizado": "2026-10-22 02:00:28",
+  "mensaje": "Prueba de eliminación a distancia."
 }
