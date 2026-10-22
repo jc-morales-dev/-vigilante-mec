@@ -1,0 +1,7 @@
+# Nunca subir: llevan el token del bot y los instaladores personales.
+privado/
+build/
+dist/
+*.spec
+__pycache__/
+lanzador/icono.ico

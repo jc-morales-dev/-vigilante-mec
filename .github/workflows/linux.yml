@@ -1,0 +1,66 @@
+name: Lanzador Linux
+
+# Construye la app para Linux, la prueba (bajar Chromium y abrirlo) y la publica
+# como release "lanzador-v1". Se lanza a mano desde la pestaña Actions o con
+# un tag lanzador-v*.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["lanzador-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          pip install playwright pyinstaller pillow
+          python -c "import tkinter; print('tk', tkinter.TkVersion)"
+
+      - name: Construir
+        run: |
+          python lanzador/hacer_icono.py
+          pyinstaller --noconfirm --clean --windowed --name vigilante-mec \
+            --add-data "codigo:codigo" --add-data "codigo/icono.png:." \
+            --paths codigo --hidden-import app --hidden-import motor \
+            lanzador/lanzador.py
+          tar -czf vigilante-mec-linux-x86_64.tar.gz -C dist vigilante-mec
+
+      - name: Probar en un Linux limpio (bajar Chromium y abrirlo)
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/datos
+        run: |
+          dist/vigilante-mec/vigilante-mec --instalar-navegador
+          sudo -E dist/vigilante-mec/vigilante-mec --instalar-dependencias
+          xvfb-run -a dist/vigilante-mec/vigilante-mec --probar-navegador | tee prueba.txt
+          grep -q NAVEGADOR_OK prueba.txt
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view lanzador-v1 >/dev/null 2>&1 || \
+            gh release create lanzador-v1 --title "Lanzador Linux v1" --notes "App Vigilante MEC para Linux (x86_64)."
+          gh release upload lanzador-v1 vigilante-mec-linux-x86_64.tar.gz --clobber
+
+      - name: Probar el instalador de Linux completo (con una config falsa)
+        run: |
+          echo '{"telegram_token": "", "chats_avisos": [], "chat_dueno": "", "rol": "respaldo", "nombre": "Prueba"}' > /tmp/config_prueba.json
+          python herramientas/crear_instalador_jose.py /tmp/config_prueba.json /tmp/instalar_prueba.sh
+          printf 'SI\nn\n' | xvfb-run -a bash /tmp/instalar_prueba.sh
+          sleep 5
+          test -x "$HOME/.local/share/vigilante-mec/app/vigilante-mec"
+          test -f "$HOME/.local/share/applications/vigilante-mec.desktop"
+          test -f "$HOME/.local/share/vigilante-mec/config.json" || test -f "$HOME/.local/share/vigilante-mec/config_instalador.json"
+          echo "INSTALADOR_OK"
