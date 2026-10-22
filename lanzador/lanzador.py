@@ -32,6 +32,8 @@ from pathlib import Path
 APP = "Vigilante MEC"
 LANZADOR_VERSION = 1
 REPO = "jc-morales-dev/-vigilante-mec"
+# La API da siempre la versión al día; raw.githubusercontent puede servir una copia de hasta 5 min.
+MANIFEST_API = f"https://api.github.com/repos/{REPO}/contents/manifest.json"
 MANIFEST_URL = f"https://raw.githubusercontent.com/{REPO}/main/manifest.json"
 
 ES_WINDOWS = os.name == "nt"
@@ -82,13 +84,20 @@ def carpeta_codigo():
 
 
 def leer_manifest():
-    try:
-        with urllib.request.urlopen(f"{MANIFEST_URL}?t={int(time.time())}", timeout=15) as r:
-            man = json.loads(r.read().decode("utf-8"))
-        (DATOS / "manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
-        return man
-    except Exception:
-        return None
+    pedidos = (
+        urllib.request.Request(MANIFEST_API, headers={"Accept": "application/vnd.github.raw+json",
+                                                      "User-Agent": "VigilanteMEC", "Cache-Control": "no-cache"}),
+        urllib.request.Request(f"{MANIFEST_URL}?t={time.time_ns()}", headers={"Cache-Control": "no-cache"}),
+    )
+    for pedido in pedidos:
+        try:
+            with urllib.request.urlopen(pedido, timeout=15) as r:
+                man = json.loads(r.read().decode("utf-8"))
+            (DATOS / "manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
+            return man
+        except Exception:
+            continue
+    return None
 
 
 def bajar_codigo(man):
