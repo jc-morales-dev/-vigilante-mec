@@ -18,7 +18,10 @@ Este repositorio es el **servidor de actualizaciones**: las apps instaladas leen
 
 ## Administrador (Windows)
 
-- **`publicar.bat`**: publica lo que haya en `codigo/`. Las apps lo bajan solas (al abrirse o en menos de 1 hora).
+- **`publicar.bat`**: publica lo que haya en `codigo/`. Las apps lo bajan solas (al abrirse o en menos de 5 minutos).
+- **`estado_equipos.bat`**: qué equipos están vigilando ahora, esperando sesión del MEC o apagados, y su versión.
+- **`quien_avisa.bat`**: elige qué PC manda los avisos de cupos (`Victor`, `Jose`, `todos` o `auto`).
+- **`cambiar_ajuste.bat`**: cambia un ajuste para todos o para un solo equipo (`Jose meses_a_vigilar 3`).
 - **`eliminar_en_todos.bat`**: desactiva la app. Cada equipo la quita junto con sus datos.
 - **`reactivar.bat`**: vuelve a permitirla (necesario antes de reinstalar tras eliminarla).
 - **`construir_instalador_windows.bat`**: genera `privado/VigilanteMEC-Setup-Victor.exe`.
@@ -26,13 +29,18 @@ Este repositorio es el **servidor de actualizaciones**: las apps instaladas leen
 
 `privado/` nunca se sube: los instaladores personales llevan el token del bot.
 
-### Ajustes para todos
+### Ajustes desde el servidor
 
-En `manifest.json`, `ajustes` pisa la config de cada equipo, por ejemplo:
+En `manifest.json`, `ajustes` pisa la config de todos los equipos y `equipos` la de uno solo
+(por su `nombre`); se aplican sin reiniciar en menos de 5 minutos:
 
 ```json
-"ajustes": {"meses_a_vigilar": 5, "intervalo_rapido_segundos": 5, "intervalo_segundos": 60}
+"ajustes": {"meses_a_vigilar": 5, "intervalo_rapido_segundos": 5, "intervalo_segundos": 60, "avisa": "Jose"},
+"equipos": {"Jose": {"intervalo_segundos": 90}}
 ```
+
+`avisos_sistema`: `"todos"` (por defecto, los mensajes de sesión/problemas de cada PC llegan a todos
+con `[PC de …]`) o `"dueno"` (solo al dueño de ese PC).
 
 ### Cambios que necesitan reinstalar
 
@@ -42,5 +50,10 @@ Si el código nuevo necesita algo que el lanzador no trae (otra librería), sube
 
 ## Avisos sin repetir
 
-El equipo `principal` avisa siempre y deja cada minuto una señal de vida en el bot.
-El `respaldo` solo avisa de cupos si esa señal tiene más de 2,5 minutos.
+Cada equipo deja cada minuto una señal de vida en el bot (vigilando, esperando sesión o
+Telegram desactivado). El equipo elegido en `avisa` (por defecto el `principal`) avisa siempre;
+los demás solo avisan de cupos si ese equipo no está vigilando o su señal tiene más de 2,5 minutos.
+Con `avisa: "todos"` avisan todos a la vez (mensajes repetidos). Los avisos llegan a todos los
+chats de `chats_avisos` y dicen qué PC los mandó.
+
+En Linux el vigilante bloquea la suspensión del equipo mientras corre (`systemd-inhibit`).

@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 APP = "Vigilante MEC"
-REVISAR_SERVIDOR_CADA = 3600
+REVISAR_SERVIDOR_CADA = 300  # el motor relee los ajustes bajados en cada revisión completa
 
 # Tema oscuro
 FONDO = "#0f172a"
@@ -54,6 +54,32 @@ def leer_config(lz):
 
 def guardar_config(lz, cfg):
     lz.CONFIG.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def config_efectiva(lz):
+    """La config de este equipo con los ajustes del servidor encima (igual que motor.cargar_config)."""
+    c = leer_config(lz)
+    try:
+        man = json.loads((lz.DATOS / "manifest.json").read_text(encoding="utf-8"))
+        c.update(man.get("ajustes") or {})
+        propios = {k.lower(): v for k, v in (man.get("equipos") or {}).items()}
+        c.update(propios.get(str(c.get("nombre", "")).lower()) or {})
+    except Exception:
+        pass
+    return c
+
+
+def quien_avisa(c):
+    """(este equipo es el elegido para avisar, texto de quién avisa)."""
+    avisa = str(c.get("avisa") or "").strip()
+    principal = c.get("rol", "principal") == "principal"
+    if avisa.lower() in ("", "auto"):
+        return principal, ("avisa siempre" if principal else "avisa si el principal no puede")
+    if avisa.lower() == "todos":
+        return True, "avisan todos los equipos"
+    if avisa.lower() == str(c.get("nombre", "")).lower():
+        return True, "avisa siempre"
+    return False, f"avisa si el PC de {avisa} no puede"
 
 
 class Motor:
@@ -256,9 +282,10 @@ def main(lz, auto=False):
         else:
             resumen["telegram"][0].configure(text="Activo ✓", fg=VERDE)
             resumen["telegram"][1].configure(text=f"avisa a {len(c.get('chats_avisos', []))} persona(s)")
-        principal = c.get("rol", "principal") == "principal"
-        resumen["pc"][0].configure(text="Principal" if principal else "Respaldo", fg=TEXTO)
-        resumen["pc"][1].configure(text="avisa siempre" if principal else "avisa si el principal no puede")
+        _, nota = quien_avisa(config_efectiva(lz))
+        resumen["pc"][0].configure(text=c.get("nombre") or ("Principal" if c.get("rol", "principal") == "principal"
+                                                            else "Respaldo"), fg=TEXTO)
+        resumen["pc"][1].configure(text=nota)
 
     # ------------------------------------------------------------ detalles (registro técnico)
     pie = tk.Frame(raiz, bg=FONDO, padx=22, pady=10)
@@ -340,10 +367,10 @@ def main(lz, auto=False):
         v_auto = casilla("Encender el vigilante al abrir la app", bool(c.get("encender_al_abrir", True)))
         v_arranque = casilla("Abrir la app al iniciar el " + ("Windows" if lz.ES_WINDOWS else "equipo"),
                              lz.arranque_activado())
-        principal = c.get("rol", "principal") == "principal"
+        avisa_este, _ = quien_avisa(config_efectiva(lz))
         v_telegram = None
-        if principal:
-            # Solo el principal puede callarse: el respaldo es quien avisa cuando el principal no lo hace.
+        if avisa_este:
+            # Solo el equipo que avisa puede callarse: los otros son quienes avisan cuando él no lo hace.
             v_telegram = casilla("Enviar avisos a Telegram desde este equipo", bool(c.get("telegram_activo", True)))
             tk.Label(cuerpo, text="Si lo quitas, los avisos los manda el otro equipo.", bg=FONDO, fg=GRIS,
                      font=F(8)).pack(anchor="w", padx=(24, 0))
@@ -513,6 +540,7 @@ def main(lz, auto=False):
             estado["aviso_reinstalar"] = True
             messagebox.showinfo(APP, "Hay una versión nueva que necesita reinstalar la app. "
                                      "Pide el instalador nuevo al administrador.")
+        refrescar_resumen()  # por si cambiaron los ajustes del servidor (quién avisa)
 
     def cerrar():
         if estado["encendido"] and not messagebox.askyesno(

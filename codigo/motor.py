@@ -8,9 +8,11 @@ NUNCA reserva ni pulsa "Siguiente": solo mira, avisa y deja el calendario listo.
 La ventana (app.py) lo lanza como proceso aparte y lee su registro. Los datos
 (config, perfil de Chrome, sesión, log) van en la carpeta VIGILANTE_DATA.
 
-Roles: el PC "principal" avisa siempre y deja una señal de vida en el bot
-(descripción corta en zulú, invisible para la gente). El PC "respaldo" solo
-avisa de cupos cuando esa señal tiene más de LATIDO_MAX segundos.
+Quién avisa: cada PC deja una señal de vida en el bot (descripción corta en un
+idioma por rol, invisible para la gente). El ajuste "avisa" del servidor elige
+el equipo que manda los avisos de cupos ("Victor", "Jose", "todos" o vacío =
+el principal); los demás solo avisan si la señal de ese equipo tiene más de
+LATIDO_MAX segundos o dice que no está vigilando.
 """
 import ctypes
 import datetime as dt
@@ -20,6 +22,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -45,9 +48,14 @@ REGISTRO = BASE / "vigilante.log"
 
 MEC = "https://bpmgob.mec.gub.uy"
 BANDEJA = MEC + "/etapas/inbox"
-IDIOMA_LATIDO = "zu"
+# Una "ranura" del bot por rol para la señal de vida (la del principal es la de siempre).
+IDIOMAS_LATIDO = {"principal": "zu", "respaldo": "xh"}
 LATIDO_CADA = 60
 LATIDO_MAX = 150
+try:
+    VERSION = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
+except OSError:
+    VERSION = "?"
 
 log = logging.info
 
@@ -75,9 +83,13 @@ def comprobar_ventana(page):
 
 def cargar_config():
     cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
-    # Ajustes que el administrador cambia para todos desde el servidor.
+    # Ajustes que el administrador cambia desde el servidor: "ajustes" para todos y
+    # "equipos" -> {"Jose": {...}} solo para un equipo (gana sobre los de todos).
     try:
-        cfg.update(json.loads(MANIFEST.read_text(encoding="utf-8")).get("ajustes", {}))
+        man = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        cfg.update(man.get("ajustes") or {})
+        propios = {k.lower(): v for k, v in (man.get("equipos") or {}).items()}
+        cfg.update(propios.get(str(cfg.get("nombre", "")).lower()) or {})
     except Exception:
         pass
     # Formato antiguo: telegram_chat_id + telegram_chat_ids_extra.
@@ -86,6 +98,9 @@ def cargar_config():
     cfg.setdefault("chats_avisos", [])
     cfg.setdefault("chat_dueno", (cfg["chats_avisos"] or [""])[0])
     cfg.setdefault("rol", "principal")
+    cfg["nombre"] = re.sub(r"\s+", "_", str(cfg.get("nombre") or cfg["rol"]).strip())
+    cfg.setdefault("avisa", "")
+    cfg.setdefault("avisos_sistema", "todos")
     cfg.setdefault("telegram_activo", True)
     cfg.setdefault("url_agenda", "")
     cfg.setdefault("texto_ubicacion", "Oficina Reguladora")
@@ -146,57 +161,99 @@ def enviar(cfg, destinos, texto):
 
 
 def avisar(cfg, texto):
-    """Mensajes del sistema (activado, sesión, problemas): solo al dueño de este PC."""
-    return enviar(cfg, [str(cfg["chat_dueno"])] if cfg.get("chat_dueno") else [], texto)
+    """Mensajes del sistema (activado, sesión, problemas), con el nombre del equipo.
 
-
-_latido = {"leido": 0.0, "vivo": False, "escrito": 0.0}
-
-
-def principal_vivo(cfg):
-    """True si el PC principal dejó su señal de vida hace poco (se consulta como mucho cada 20 s)."""
-    if time.time() - _latido["leido"] < 20:
-        return _latido["vivo"]
-    try:
-        r = telegram(cfg, "getMyShortDescription", {"language_code": IDIOMA_LATIDO})
-        m = re.search(r"vivo (\d+)", r.get("result", {}).get("short_description", ""))
-        _latido["vivo"] = bool(m) and time.time() - int(m.group(1)) < LATIDO_MAX
-    except Exception as e:
-        log(f"No pude leer la señal del PC principal: {error_corto(e)}")
-        _latido["vivo"] = False  # ante la duda, avisar
-    _latido["leido"] = time.time()
-    return _latido["vivo"]
-
-
-def dejar_latido(cfg):
-    """El principal deja 'vivo <hora>' en el bot, en segundo plano para no frenar la vigilancia.
-
-    Con Telegram desactivado deja 'mudo <hora>' (una vez): el respaldo toma el relevo enseguida.
+    Con avisos_sistema "todos" (por defecto) les llegan a todos los chats; con "dueno", solo al dueño de este PC.
     """
-    if cfg["rol"] != "principal" or not cfg.get("telegram_token"):
+    dueno = [str(cfg["chat_dueno"])] if cfg.get("chat_dueno") else []
+    if cfg["avisos_sistema"] == "dueno":
+        destinos = dueno
+    else:
+        destinos = list(dict.fromkeys([str(c) for c in cfg["chats_avisos"]] + dueno))
+    return enviar(cfg, destinos, f"[PC de {cfg['nombre']}] {texto}")
+
+
+_latido = {"leido": 0.0, "equipos": [], "escrito": 0.0, "estado": ""}
+
+
+def interpretar_latido(texto, rol):
+    """'vigilando 1761400000 Jose respaldo 1.2.0' -> dict (acepta el antiguo 'vivo 1761400000')."""
+    p = texto.split()
+    if len(p) < 2 or not p[1].isdigit():
+        return None
+    return {"estado": "vigilando" if p[0] == "vivo" else p[0], "hora": int(p[1]),
+            "nombre": p[2] if len(p) > 2 else "", "rol": p[3] if len(p) > 3 else rol,
+            "version": p[4] if len(p) > 4 else ""}
+
+
+def leer_latidos(cfg):
+    """Señales de vida de todos los equipos (se consultan como mucho cada 20 s)."""
+    if time.time() - _latido["leido"] < 20:
+        return _latido["equipos"]
+    equipos = []
+    for rol, idioma in IDIOMAS_LATIDO.items():
+        try:
+            r = telegram(cfg, "getMyShortDescription", {"language_code": idioma})
+        except Exception as e:
+            log(f"No pude leer la señal de los otros equipos: {error_corto(e)}")
+            continue  # ante la duda, ese equipo cuenta como apagado y este avisa
+        latido = interpretar_latido(r.get("result", {}).get("short_description", ""), rol)
+        if latido:
+            equipos.append(latido)
+    _latido.update(leido=time.time(), equipos=equipos)
+    return equipos
+
+
+def soy_quien_avisa(cfg):
+    avisa = str(cfg["avisa"]).strip().lower()
+    if avisa in ("", "auto"):
+        return cfg["rol"] == "principal"
+    return avisa in ("todos", cfg["nombre"].lower())
+
+
+def avisa_otro_equipo(cfg):
+    """Nombre del equipo elegido para avisar si no es este y está vigilando ahora; si no, None."""
+    avisa = str(cfg["avisa"]).strip().lower()
+    for l in leer_latidos(cfg):
+        elegido = l["rol"] == "principal" if avisa in ("", "auto") else l["nombre"].lower() == avisa
+        if (elegido and l["nombre"].lower() != cfg["nombre"].lower() and l["estado"] == "vigilando"
+                and time.time() - l["hora"] < LATIDO_MAX):
+            return l["nombre"] or l["rol"]
+    return None
+
+
+def dejar_latido(cfg, estado="vigilando"):
+    """Deja '<estado> <hora> <nombre> <rol> <versión>' en el bot, en segundo plano para no frenar.
+
+    Estados: vigilando, esperando (sin sesión del MEC) o mudo (Telegram desactivado en este PC);
+    con cualquiera que no sea vigilando, los otros equipos avisan enseguida.
+    """
+    if not cfg.get("telegram_token"):
         return
-    if not cfg["telegram_activo"] and _latido["escrito"]:
+    if not cfg["telegram_activo"]:
+        estado = "mudo"
+    if estado == _latido["estado"] and time.time() - _latido["escrito"] < LATIDO_CADA:
         return
-    if time.time() - _latido["escrito"] < LATIDO_CADA:
-        return
-    _latido["escrito"] = time.time()
-    estado = "vivo" if cfg["telegram_activo"] else "mudo"
+    _latido.update(escrito=time.time(), estado=estado)
+    texto = f"{estado} {int(time.time())} {cfg['nombre']} {cfg['rol']} {VERSION}"
+    idioma = IDIOMAS_LATIDO.get(cfg["rol"], IDIOMAS_LATIDO["principal"])
 
     def tarea():
         try:
-            telegram(cfg, "setMyShortDescription",
-                     {"short_description": f"{estado} {int(time.time())}", "language_code": IDIOMA_LATIDO})
+            telegram(cfg, "setMyShortDescription", {"short_description": texto, "language_code": idioma})
         except Exception as e:
             log(f"No pude dejar la señal de vida: {error_corto(e)}")
     threading.Thread(target=tarea, daemon=True).start()
 
 
 def avisar_cupo(cfg, texto):
-    """Avisos de cupos: a todos, salvo que este PC sea el respaldo y el principal esté vivo."""
-    if cfg["rol"] == "respaldo" and principal_vivo(cfg):
-        log("Cupo detectado; avisa el PC principal (está activo).")
-        return False
-    return enviar(cfg, [str(c) for c in cfg["chats_avisos"]], texto)
+    """Avisos de cupos: a todos, salvo que otro equipo sea el elegido para avisar y esté vigilando."""
+    if not soy_quien_avisa(cfg):
+        otro = avisa_otro_equipo(cfg)
+        if otro:
+            log(f"Cupo detectado; avisa el PC de {otro} (está vigilando).")
+            return False
+    return enviar(cfg, [str(c) for c in cfg["chats_avisos"]], f"{texto}\n(avisa el PC de {cfg['nombre']})")
 
 
 # ---------------------------------------------------------------- Agenda
@@ -387,6 +444,7 @@ def esperar_login(page, cfg):
     ultima_url, ultimo_cambio, ultima_busqueda, avisado = page.url, time.time(), 0.0, False
     ultimo_estado = 0.0
     while True:
+        dejar_latido(cfg, "esperando")
         if time.time() - ultimo_estado > 300:
             ultimo_estado = time.time()
             log(f"Esperando sesión/trámite (la ventana está en {page.url.split('?')[0]})")
@@ -502,6 +560,7 @@ def modo_reserva(page, cfg, segundos):
         f"{' min' if segundos >= 60 else ' s'} (más si la estás usando).")
     while True:
         comprobar_ventana(page)
+        dejar_latido(cfg)  # sigue al mando: el cupo ya se avisó desde aquí
         time.sleep(2)
         try:
             url = page.url
@@ -547,15 +606,45 @@ def abrir_chrome(p, headless=False):
         raise RuntimeError(f"No hay navegador: instala Google Chrome ({primero} / {error_corto(e)})")
 
 
+def impedir_suspension():
+    """Evita que el equipo se suspenda mientras el vigilante corre."""
+    if ES_WINDOWS:
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+        return
+    if not shutil.which("systemd-inhibit"):
+        log("No puedo impedir que el equipo se suspenda (falta systemd-inhibit): desactiva la suspensión.")
+        return
+    try:
+        # El bloqueo dura lo que viva este proceso (tail --pid termina cuando el motor se cierra).
+        subprocess.Popen(["systemd-inhibit", "--what=sleep:idle", "--who=Vigilante MEC",
+                          "--why=Vigilando los cupos del MEC", "--mode=block",
+                          "tail", f"--pid={os.getpid()}", "-f", "/dev/null"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log("Suspensión del equipo bloqueada mientras vigilo.")
+    except Exception as e:
+        log(f"No pude impedir que el equipo se suspenda: {error_corto(e)}")
+
+
+def recargar_config(cfg):
+    """Vuelve a leer la config y los ajustes del servidor (la app baja el manifest cada pocos minutos)."""
+    try:
+        nuevo = cargar_config()
+    except Exception as e:
+        log(f"No pude releer la config: {error_corto(e)}")
+        return cfg
+    cambios = sorted(k for k in set(cfg) | set(nuevo) if cfg.get(k) != nuevo.get(k))
+    if cambios:
+        log("Ajustes nuevos: " + ", ".join(cambios))
+    return nuevo
+
+
 def main():
     configurar_log()
     cfg = cargar_config()
     simulacro = "--simulacro" in sys.argv
     prueba = "--prueba" in sys.argv or simulacro
-
-    if ES_WINDOWS:
-        # Evita que Windows se suspenda mientras el vigilante corre.
-        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+    log(f"Vigilante v{VERSION} en el PC de {cfg['nombre']} ({cfg['rol']}).")
+    impedir_suspension()
 
     with sync_playwright() as p:
         ctx = abrir_chrome(p)
@@ -606,6 +695,7 @@ def main():
                     time.sleep(max(1.0, cfg["intervalo_rapido_segundos"] + random.uniform(-1, 1)))
                     continue
 
+                cfg = recargar_config(cfg)
                 meses_txt = ", ".join(f"{m:02d}/{a}" for a, m in meses_ventana(cfg["meses_a_vigilar"]))
                 fechas, posible_visual, api, base = revisar(page, cfg)
                 ctx.storage_state(path=str(SESION))

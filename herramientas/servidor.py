@@ -4,12 +4,17 @@
     python herramientas/servidor.py eliminar [mensaje]   desactiva la app: se quita sola de todos los equipos
     python herramientas/servidor.py reactivar            vuelve a permitir la app (para instalar de nuevo)
     python herramientas/servidor.py estado               muestra el manifest publicado
+    python herramientas/servidor.py equipos              qué equipos están vigilando ahora (señal de vida del bot)
+    python herramientas/servidor.py avisa <quién>        quién manda los avisos de cupos: Victor, Jose, todos o auto
+    python herramientas/servidor.py ajuste <equipo|todos> <clave> [valor]   cambia un ajuste (sin valor lo quita)
 """
 import hashlib
 import json
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -19,6 +24,8 @@ MANIFEST = RAIZ / "manifest.json"
 CODIGO = RAIZ / "codigo"
 PAQUETES = RAIZ / "paquetes"
 ARCHIVOS_CODIGO = ("app.py", "motor.py", "icono.png", "VERSION")
+IDIOMAS_LATIDO = {"principal": "zu", "respaldo": "xh"}  # los mismos que codigo/motor.py
+LATIDO_MAX = 150
 
 
 def leer():
@@ -98,6 +105,88 @@ def reactivar():
     print("\nApp reactivada: ya se puede instalar de nuevo.")
 
 
+def token_bot():
+    for config in sorted((RAIZ / "privado").glob("config_*.json")):
+        token = json.loads(config.read_text(encoding="utf-8")).get("telegram_token")
+        if token:
+            return token
+    sys.exit("No encontré el token del bot en privado/config_*.json.")
+
+
+def hace(segundos):
+    if segundos < 120:
+        return f"hace {segundos} s"
+    if segundos < 7200:
+        return f"hace {segundos // 60} min"
+    return f"hace {segundos // 3600} h"
+
+
+def equipos():
+    token = token_bot()
+    avisa = str(leer().get("ajustes", {}).get("avisa") or "auto")
+    print(f"Quién avisa de los cupos: {avisa}\n")
+    for rol, idioma in IDIOMAS_LATIDO.items():
+        url = f"https://api.telegram.org/bot{token}/getMyShortDescription?" + urllib.parse.urlencode(
+            {"language_code": idioma})
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                texto = json.loads(r.read().decode()).get("result", {}).get("short_description", "")
+        except Exception as e:
+            print(f"  {rol:10} no pude leer su señal: {str(e).splitlines()[0][:100]}")
+            continue
+        p = texto.split()
+        if len(p) < 2 or not p[1].isdigit():
+            print(f"  {rol:10} sin señal todavía (nunca abrió la versión nueva)")
+            continue
+        estado = "vigilando" if p[0] == "vivo" else p[0]
+        nombre = p[2] if len(p) > 2 else "?"
+        version = f"v{p[4]}" if len(p) > 4 else "versión antigua"
+        segundos = int(time.time()) - int(p[1])
+        if segundos > LATIDO_MAX:
+            resumen = f"APAGADO o sin internet (última señal {hace(segundos)}, estaba {estado})"
+        else:
+            resumen = {"vigilando": "VIGILANDO", "esperando": "ESPERANDO que inicien sesión en el MEC",
+                       "mudo": "encendido, con Telegram desactivado"}.get(estado, estado)
+            resumen += f" ({hace(segundos)})"
+        print(f"  {nombre:10} {rol:10} {version:16} {resumen}")
+
+
+def valor_ajuste(texto):
+    try:
+        return json.loads(texto)  # números, true/false, listas...
+    except ValueError:
+        return texto
+
+
+def cambiar_ajuste(equipo, clave, valor=None):
+    """equipo 'todos' -> manifest["ajustes"]; otro nombre -> manifest["equipos"][nombre]."""
+    man = leer()
+    if equipo.lower() == "todos":
+        destino = man.setdefault("ajustes", {})
+    else:
+        todos = man.setdefault("equipos", {})
+        equipo = next((k for k in todos if k.lower() == equipo.lower()), equipo)
+        destino = todos.setdefault(equipo, {})
+    if valor is None:
+        destino.pop(clave, None)
+    else:
+        destino[clave] = valor_ajuste(valor)
+    man["equipos"] = {k: v for k, v in man.get("equipos", {}).items() if v}
+    escribir(man)
+    texto = f"{clave} = {destino[clave]!r}" if clave in destino else f"{clave} quitado"
+    subir(f"Ajuste ({equipo}): {texto}")
+    print(f"\nListo ({equipo}): {texto}. Los equipos lo aplican en menos de 5 minutos.")
+
+
+def elegir_avisa(quien):
+    if not quien:
+        sys.exit("Indica quién avisa: Victor, Jose, todos o auto (el principal).")
+    if quien.lower() == "auto":
+        cambiar_ajuste("todos", "avisa")
+    else:
+        cambiar_ajuste("todos", "avisa", json.dumps(quien))
+
+
 if __name__ == "__main__":
     orden = sys.argv[1] if len(sys.argv) > 1 else "estado"
     resto = " ".join(sys.argv[2:])
@@ -107,5 +196,11 @@ if __name__ == "__main__":
         eliminar(resto)
     elif orden == "reactivar":
         reactivar()
+    elif orden == "equipos":
+        equipos()
+    elif orden == "avisa":
+        elegir_avisa(resto.strip())
+    elif orden == "ajuste" and len(sys.argv) >= 4:
+        cambiar_ajuste(sys.argv[2], sys.argv[3], " ".join(sys.argv[4:]) or None)
     else:
         print(json.dumps(leer(), indent=2, ensure_ascii=False))
