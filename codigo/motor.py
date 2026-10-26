@@ -18,6 +18,7 @@ import ctypes
 import datetime as dt
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -110,8 +111,14 @@ def cargar_config():
     cfg.setdefault("recordatorio_minutos", 5)
     cfg.setdefault("intervalo_rapido_segundos", 5)
     cfg.setdefault("congelar_minutos", 3)
+    # Ráfaga de mensajes al aparecer un cupo: cada uno hace sonar el celular.
+    cfg.setdefault("alarma_repeticiones", 6)
+    cfg.setdefault("alarma_cada_segundos", 5)
+    cfg.setdefault("chats_alarma", cfg["chats_avisos"])
     cfg["intervalo_segundos"] = max(30, int(cfg["intervalo_segundos"]))
     cfg["intervalo_rapido_segundos"] = max(3, float(cfg["intervalo_rapido_segundos"]))
+    cfg["alarma_repeticiones"] = max(0, min(20, int(cfg["alarma_repeticiones"])))
+    cfg["alarma_cada_segundos"] = max(3, float(cfg["alarma_cada_segundos"]))
     return cfg
 
 
@@ -246,14 +253,34 @@ def dejar_latido(cfg, estado="vigilando"):
     threading.Thread(target=tarea, daemon=True).start()
 
 
-def avisar_cupo(cfg, texto):
-    """Avisos de cupos: a todos, salvo que otro equipo sea el elegido para avisar y esté vigilando."""
+def alarma_telegram(cfg, destinos, veces=None, prueba=False):
+    """Ráfaga de mensajes de alarma, uno cada alarma_cada_segundos, en segundo plano."""
+    veces = cfg["alarma_repeticiones"] if veces is None else veces
+    if not veces or not destinos:
+        return
+
+    def tarea():
+        for i in range(1, veces + 1):
+            time.sleep(cfg["alarma_cada_segundos"])
+            enviar(cfg, destinos, f"🧪 PRUEBA de alarma {i}/{veces}" if prueba
+                   else f"🚨🔔 ALARMA {i}/{veces}: ¡HAY CUPO EN EL MEC! Entra ya: {MEC}")
+    threading.Thread(target=tarea, daemon=True).start()
+
+
+def avisar_cupo(cfg, texto, alarma=False):
+    """Avisos de cupos: a todos, salvo que otro equipo sea el elegido para avisar y esté vigilando.
+
+    Con alarma (cupo nuevo) sigue una ráfaga de mensajes a chats_alarma.
+    """
     if not soy_quien_avisa(cfg):
         otro = avisa_otro_equipo(cfg)
         if otro:
             log(f"Cupo detectado; avisa el PC de {otro} (está vigilando).")
             return False
-    return enviar(cfg, [str(c) for c in cfg["chats_avisos"]], f"{texto}\n(avisa el PC de {cfg['nombre']})")
+    enviado = enviar(cfg, [str(c) for c in cfg["chats_avisos"]], f"{texto}\n(avisa el PC de {cfg['nombre']})")
+    if enviado and alarma:
+        alarma_telegram(cfg, [str(c) for c in cfg["chats_alarma"]])
+    return enviado
 
 
 # ---------------------------------------------------------------- Agenda
@@ -576,13 +603,47 @@ def modo_reserva(page, cfg, segundos):
 
 # ---------------------------------------------------------------- Bucle
 
-def alarma_local():
-    for _ in range(5):
-        if winsound:
-            winsound.Beep(1500, 400)
-        elif sys.stdout:
-            print("\a", end="", flush=True)
-        time.sleep(0.15)
+def sonido_alarma(segundos=3.0, muestreo=22050):
+    """WAV de sirena de dos tonos (900/1400 Hz), con el volumen al máximo.
+
+    Sin el módulo struct: no viene en la app instalada.
+    """
+    def n(valor, largo):
+        return int(valor).to_bytes(largo, "little")
+
+    muestras = bytearray()
+    fase = 0.0
+    for i in range(int(segundos * muestreo)):
+        tono = 1400 if (i / muestreo * 3) % 1 < 0.5 else 900
+        fase += 2 * math.pi * tono / muestreo
+        valor = max(-1.0, min(1.0, 1.6 * math.sin(fase)))  # algo recortada: suena más fuerte
+        muestras += int(valor * 32000).to_bytes(2, "little", signed=True)
+    cabecera = (b"RIFF" + n(36 + len(muestras), 4) + b"WAVEfmt " + n(16, 4) + n(1, 2) + n(1, 2)
+                + n(muestreo, 4) + n(muestreo * 2, 4) + n(2, 2) + n(16, 2) + b"data" + n(len(muestras), 4))
+    return cabecera + bytes(muestras)
+
+
+def alarma_local(veces=4):
+    """Hace sonar la sirena en este PC, en segundo plano para no frenar la vigilancia."""
+    def tarea():
+        try:
+            sonido = sonido_alarma()
+            if winsound:
+                for _ in range(veces):
+                    winsound.PlaySound(sonido, winsound.SND_MEMORY)
+                return
+            archivo = BASE / "alarma.wav"
+            archivo.write_bytes(sonido)
+            reproductor = next((r for r in ("paplay", "pw-play", "aplay") if shutil.which(r)), None)
+            if not reproductor:
+                log("No puedo hacer sonar la alarma en este equipo (falta paplay o aplay).")
+                return
+            for _ in range(veces):
+                subprocess.run([reproductor, str(archivo)], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=30)
+        except Exception as e:
+            log(f"No pude hacer sonar la alarma: {error_corto(e)}")
+    threading.Thread(target=tarea, daemon=True).start()
 
 
 def abrir_chrome(p, headless=False):
@@ -722,7 +783,7 @@ def main():
                         traer_al_frente(page)
                     if nuevas or ahora - ultimo_aviso_cupo > cfg["recordatorio_minutos"] * 60:
                         avisar_cupo(cfg, "🚨 ¡HAY CUPOS en el MEC! Fechas: " + ", ".join(fechas)
-                                    + f"\nEntra ya: {MEC}")
+                                    + f"\nEntra ya: {MEC}", alarma=aparecio_otra)
                         ultimo_aviso_cupo = ahora
                         alarma_local()
                     ultimas_fechas = fechas

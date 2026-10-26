@@ -379,7 +379,8 @@ def main(lz, auto=False):
         acciones.pack(fill="x", pady=(16, 0))
         boton(acciones, "Cambiar token", lambda: cambiar_token(v)).pack(side="left")
         boton(acciones, "Probar Telegram", probar_telegram).pack(side="left", padx=6)
-        boton(acciones, "Carpeta de datos", abrir_datos).pack(side="left")
+        boton(acciones, "Probar alarma", probar_alarma).pack(side="left")
+        boton(acciones, "Carpeta de datos", abrir_datos).pack(side="left", padx=6)
 
         def guardar():
             url = v_url.get().strip()
@@ -431,6 +432,24 @@ def main(lz, auto=False):
             except Exception as e:
                 msg = str(e).splitlines()[0][:150] if str(e) else type(e).__name__
                 raiz.after(0, lambda: messagebox.showerror(APP, f"No se pudo enviar: {msg}"))
+        threading.Thread(target=tarea, daemon=True).start()
+
+    def probar_alarma():
+        """Sirena en este PC y 3 mensajes de alarma solo al dueño (para probar el sonido del celular)."""
+        def tarea():
+            try:
+                motor_mod = lz.cargar("motor")
+                c = motor_mod.cargar_config()
+                motor_mod.alarma_local(veces=1)
+                destinos = [str(c["chat_dueno"])] if c.get("chat_dueno") else []
+                motor_mod.alarma_telegram(c, destinos, veces=3, prueba=True)
+                texto = (f"Suena la alarma en este equipo. Llegan 3 mensajes de prueba a tu Telegram, uno cada "
+                         f"{c['alarma_cada_segundos']:g} s." if destinos else
+                         "Suena la alarma en este equipo (no hay chat de Telegram para la prueba).")
+                raiz.after(0, lambda: messagebox.showinfo(APP, texto))
+            except Exception as e:
+                msg = str(e).splitlines()[0][:150] if str(e) else type(e).__name__
+                raiz.after(0, lambda: messagebox.showerror(APP, f"No se pudo probar la alarma: {msg}"))
         threading.Thread(target=tarea, daemon=True).start()
 
     def abrir_datos():

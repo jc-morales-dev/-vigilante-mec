@@ -22,6 +22,14 @@ Este repositorio es el **servidor de actualizaciones**: las apps instaladas leen
 - **`estado_equipos.bat`**: qué equipos están vigilando ahora, esperando sesión del MEC o apagados, y su versión.
 - **`quien_avisa.bat`**: elige qué PC manda los avisos de cupos (`Victor`, `Jose`, `todos` o `auto`).
 - **`cambiar_ajuste.bat`**: cambia un ajuste para todos o para un solo equipo (`Jose meses_a_vigilar 3`).
+- **`mandar_sonido_alarma.bat`**: manda por el bot `herramientas/alarma_mec.mp3` con las instrucciones
+  para ponerlo como sonido del chat del bot en el celular.
+
+### Alarma de cupo
+
+Al aparecer un cupo nuevo, además del aviso llegan `alarma_repeticiones` (6) mensajes de alarma, uno cada
+`alarma_cada_segundos` (5), a `chats_alarma` (por defecto todos los chats), y el PC hace sonar una sirena.
+`alarma_repeticiones 0` la apaga. En Ajustes, «Probar alarma» la prueba solo con el dueño del equipo.
 - **`eliminar_en_todos.bat`**: desactiva la app. Cada equipo la quita junto con sus datos.
 - **`reactivar.bat`**: vuelve a permitirla (necesario antes de reinstalar tras eliminarla).
 - **`construir_instalador_windows.bat`**: genera `privado/VigilanteMEC-Setup-Victor.exe`.
