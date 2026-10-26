@@ -115,6 +115,7 @@ def cargar_config():
     cfg.setdefault("alarma_repeticiones", 6)
     cfg.setdefault("alarma_cada_segundos", 5)
     cfg.setdefault("chats_alarma", cfg["chats_avisos"])
+    cfg.setdefault("sonido_alarma", "telefono")  # en el PC: telefono, despertador, campana o sirena
     cfg["intervalo_segundos"] = max(30, int(cfg["intervalo_segundos"]))
     cfg["intervalo_rapido_segundos"] = max(3, float(cfg["intervalo_rapido_segundos"]))
     cfg["alarma_repeticiones"] = max(0, min(20, int(cfg["alarma_repeticiones"])))
@@ -603,31 +604,68 @@ def modo_reserva(page, cfg, segundos):
 
 # ---------------------------------------------------------------- Bucle
 
-def sonido_alarma(segundos=3.0, muestreo=22050):
-    """WAV de sirena de dos tonos (900/1400 Hz), con el volumen al máximo.
+def _despertador(t):
+    """Bip-bip-bip-bip de reloj despertador (2000 Hz) y una pausa, cada segundo."""
+    paso = t % 1.0
+    if paso >= 0.48 or paso % 0.12 >= 0.07:
+        return 0.0
+    return max(-1.0, min(1.0, 3 * math.sin(2 * math.pi * 2000 * t)))
+
+
+def _campana(t):
+    """Campanada (parciales de campana que se apagan), cada 0,8 s."""
+    golpe = t % 0.8
+    return math.exp(-golpe * 4) * sum(a * math.sin(2 * math.pi * 880 * f * golpe)
+                                      for f, a in ((1, 0.6), (2.0, 0.3), (3.0, 0.2), (4.2, 0.15)))
+
+
+def _telefono(t):
+    """Timbre de teléfono antiguo: rrring (0,4 s) - rrring (0,4 s) y pausa, cada 1,6 s."""
+    paso = t % 1.6
+    if not (paso < 0.4 or 0.6 <= paso < 1.0):
+        return 0.0
+    tono = 1300 if int(t * 50) % 2 else 1600  # el martillo golpeando las dos campanillas
+    return max(-1.0, min(1.0, 2 * math.sin(2 * math.pi * tono * t)))
+
+
+def _sirena(t):
+    """Sirena de dos tonos (900/1400 Hz)."""
+    tono = 1400 if (t * 3) % 1 < 0.5 else 900
+    return max(-1.0, min(1.0, 1.6 * math.sin(2 * math.pi * tono * t)))
+
+
+SONIDOS = {"despertador": _despertador, "campana": _campana, "telefono": _telefono, "sirena": _sirena}
+
+
+def sonido_alarma(segundos=3.0, tipo="telefono", muestreo=22050):
+    """WAV del sonido de alarma elegido, con el volumen al máximo.
 
     Sin el módulo struct: no viene en la app instalada.
     """
     def n(valor, largo):
         return int(valor).to_bytes(largo, "little")
 
+    onda = SONIDOS.get(tipo, _telefono)
     muestras = bytearray()
-    fase = 0.0
     for i in range(int(segundos * muestreo)):
-        tono = 1400 if (i / muestreo * 3) % 1 < 0.5 else 900
-        fase += 2 * math.pi * tono / muestreo
-        valor = max(-1.0, min(1.0, 1.6 * math.sin(fase)))  # algo recortada: suena más fuerte
+        valor = max(-1.0, min(1.0, onda(i / muestreo)))
         muestras += int(valor * 32000).to_bytes(2, "little", signed=True)
     cabecera = (b"RIFF" + n(36 + len(muestras), 4) + b"WAVEfmt " + n(16, 4) + n(1, 2) + n(1, 2)
                 + n(muestreo, 4) + n(muestreo * 2, 4) + n(2, 2) + n(16, 2) + b"data" + n(len(muestras), 4))
     return cabecera + bytes(muestras)
 
 
-def alarma_local(veces=4):
-    """Hace sonar la sirena en este PC, en segundo plano para no frenar la vigilancia."""
+def alarma_local(veces=4, tipo=None):
+    """Hace sonar la alarma en este PC, en segundo plano para no frenar la vigilancia."""
+    if tipo is None:
+        try:
+            tipo = cargar_config()["sonido_alarma"]
+        except Exception:
+            tipo = "telefono"
+
     def tarea():
         try:
-            sonido = sonido_alarma()
+            sonido = sonido_alarma(tipo=tipo)
             if winsound:
                 for _ in range(veces):
                     winsound.PlaySound(sonido, winsound.SND_MEMORY)
