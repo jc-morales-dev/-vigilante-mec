@@ -8,6 +8,7 @@ el archivo config.vmec que se pone al lado. Instala por usuario, sin permisos de
     "Instalar Vigilante MEC" --sin-ventana --acepto   lo mismo por consola (pruebas automáticas)
 """
 import base64
+import http.client
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -27,6 +29,7 @@ APP = "Vigilante MEC"
 REPO = "jc-morales-dev/-vigilante-mec"
 PAQUETE_APP = "vigilante-mec-linux-x86_64.tar.gz"  # si está al lado del instalador, no se baja nada
 URL_APP = f"https://github.com/{REPO}/releases/download/lanzador-v1/{PAQUETE_APP}"
+INTENTOS_BAJADA = 5
 DATOS = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vigilante-mec"
 APPDIR = DATOS / "app"
 EXE = APPDIR / "vigilante-mec"
@@ -86,20 +89,31 @@ def navegador_ok():
 
 
 def bajar_app(paso, avance):
-    paso("Bajando la app…")
     tmp = Path(tempfile.mkstemp(suffix=".tar.gz")[1])
-    with urllib.request.urlopen(URL_APP, timeout=60) as r, tmp.open("wb") as f:
-        total = int(r.headers.get("Content-Length") or 0)
-        bajado = 0
-        while True:
-            trozo = r.read(1 << 16)
-            if not trozo:
-                break
-            f.write(trozo)
-            bajado += len(trozo)
-            if total:
-                avance(bajado * 50 // total)
-    return tmp
+    for intento in range(1, INTENTOS_BAJADA + 1):
+        paso("Bajando la app…" if intento == 1 else f"Se cortó la conexión. Reintento {intento} de {INTENTOS_BAJADA}…")
+        try:
+            with urllib.request.urlopen(URL_APP, timeout=60) as r, tmp.open("wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                bajado = 0
+                while True:
+                    trozo = r.read(1 << 16)
+                    if not trozo:
+                        break
+                    f.write(trozo)
+                    bajado += len(trozo)
+                    if total:
+                        avance(bajado * 50 // total)
+            # Si la conexión se corta a media descarga, read() termina sin dar error.
+            if not total or bajado == total:
+                return tmp
+            error = f"llegaron {bajado} de {total} bytes"
+        except (OSError, http.client.HTTPException) as e:
+            error = e
+        if intento < INTENTOS_BAJADA:
+            time.sleep(5)
+    tmp.unlink(missing_ok=True)
+    raise RuntimeError(f"No se pudo bajar la app: {error}. Prueba con otra red.")
 
 
 def instalar(cfg, icono_escritorio, arranque, paso, avance):
