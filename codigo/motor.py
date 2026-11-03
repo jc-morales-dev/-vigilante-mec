@@ -690,12 +690,18 @@ def abrir_chrome(p, headless=False):
         return p.chromium.launch_persistent_context(str(PERFIL), channel="chrome", **opciones)
     except Exception as e:
         primero = error_corto(e)
-    # Linux sin Google Chrome: Chromium del sistema (no el de snap, que no puede usar esta carpeta)...
-    for nombre in ("chromium", "chromium-browser", "google-chrome-stable"):
-        ruta = shutil.which(nombre)
+    # Linux sin Google Chrome: navegador del sistema o el Chromium incluido en la app (navegadores/).
+    candidatos = [shutil.which(n) for n in ("google-chrome", "google-chrome-stable", "chromium",
+                                            "chromium-browser", "brave-browser", "microsoft-edge")]
+    candidatos += [str(c) for c in sorted((BASE / "navegadores").glob("chromium-*/chrome-linux*/chrome"), reverse=True)]
+    for ruta in candidatos:
         if ruta and "/snap/" not in os.path.realpath(ruta):
-            log(f"No encontré Google Chrome; uso {ruta}")
-            return p.chromium.launch_persistent_context(str(PERFIL), executable_path=ruta, **opciones)
+            try:
+                ctx = p.chromium.launch_persistent_context(str(PERFIL), executable_path=ruta, **opciones)
+                log(f"No encontré Google Chrome; uso {ruta}")
+                return ctx
+            except Exception:
+                continue
     # ...o el Chromium que bajó el instalador (PLAYWRIGHT_BROWSERS_PATH).
     try:
         ctx = p.chromium.launch_persistent_context(str(PERFIL), **opciones)

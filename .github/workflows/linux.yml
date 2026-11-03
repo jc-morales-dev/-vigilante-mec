@@ -53,6 +53,8 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/datos
         run: |
           dist/vigilante-mec/vigilante-mec --instalar-navegador
+          rm -rf "${{ runner.temp }}/datos/vigilante-mec/navegadores/chromium_headless_shell-"*
+          tar -czf navegador-linux-x86_64.tar.gz -C "${{ runner.temp }}/datos/vigilante-mec" navegadores
           sudo -E dist/vigilante-mec/vigilante-mec --instalar-dependencias
           xvfb-run -a dist/vigilante-mec/vigilante-mec --probar-navegador | tee prueba.txt
           grep -q NAVEGADOR_OK prueba.txt
@@ -75,16 +77,18 @@ jobs:
         run: |
           mkdir -p /tmp/todo
           cp instalar-vigilante-mec-linux-x86_64 "/tmp/todo/Instalar Vigilante MEC"
-          cp vigilante-mec-linux-x86_64.tar.gz /tmp/todo/
+          cp vigilante-mec-linux-x86_64.tar.gz navegador-linux-x86_64.tar.gz /tmp/todo/
           echo '{"telegram_token": "", "chats_avisos": [], "chat_dueno": "", "rol": "respaldo"}' | base64 -w0 > /tmp/todo/config.vmec
-          # Sin red ni Chrome el paso del navegador no puede pasar: se comprueba que la app quedó instalada.
+          # Sin red ni Chrome se comprueba que tanto la app como el navegador incluido quedan instalados sin descargar nada.
           docker run --rm --network none -v /tmp/todo:/p:ro fedora:latest sh -c '
             D=/root/.local/share/vigilante-mec
             timeout 400 "/p/Instalar Vigilante MEC" --sin-ventana --acepto > /tmp/salida.txt 2>&1
             cat /tmp/salida.txt
             ! grep -q "Bajando la app" /tmp/salida.txt &&
+              ! grep -q "Bajando el navegador" /tmp/salida.txt &&
               grep -q "Comprobando el navegador" /tmp/salida.txt &&
               test -x "$D/app/vigilante-mec" &&
+              test -d "$D/navegadores" &&
               { test -f "$D/config.json" || test -f "$D/config_instalador.json"; } &&
               test -f /root/.local/share/applications/vigilante-mec.desktop &&
               echo PAQUETE_OK' | tee todo.txt
@@ -96,7 +100,7 @@ jobs:
         run: |
           gh release view lanzador-v1 >/dev/null 2>&1 || \
             gh release create lanzador-v1 --title "Lanzador Linux v1" --notes "App Vigilante MEC para Linux (x86_64)."
-          gh release upload lanzador-v1 vigilante-mec-linux-x86_64.tar.gz instalar-vigilante-mec-linux-x86_64 --clobber
+          gh release upload lanzador-v1 vigilante-mec-linux-x86_64.tar.gz navegador-linux-x86_64.tar.gz instalar-vigilante-mec-linux-x86_64 --clobber
 
       - name: Probar el instalador con ventana (en modo consola, con una config falsa)
         run: |

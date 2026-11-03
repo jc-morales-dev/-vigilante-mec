@@ -1,12 +1,13 @@
 """Genera los instaladores de Linux para José, con su config dentro. Llevan el token del bot:
 mándaselos por privado, nunca los subas al servidor.
 
-  privado/Vigilante-MEC-Jose-completo.tar.gz   todo en uno: doble clic, sin comandos y sin bajar la app
-  privado/instalar_vigilante_jose.sh      alternativa por terminal:  bash instalar_vigilante_jose.sh
+  privado/Vigilante-MEC-Jose-completo.tar.gz   todo en uno: doble clic, sin comandos y sin bajar nada (incluye app y navegador)
+  privado/instalar_vigilante_jose.sh           alternativa por terminal:  bash instalar_vigilante_jose.sh
 """
 import base64
 import io
 import json
+import shutil
 import sys
 import tarfile
 import time
@@ -17,19 +18,20 @@ RAIZ = Path(__file__).resolve().parent.parent
 REPO = "jc-morales-dev/-vigilante-mec"
 BASE_RELEASE = f"https://github.com/{REPO}/releases/download/lanzador-v1"
 URL_LINUX = f"{BASE_RELEASE}/vigilante-mec-linux-x86_64.tar.gz"
+URL_NAVEGADOR = f"{BASE_RELEASE}/navegador-linux-x86_64.tar.gz"
 URL_INSTALADOR = f"{BASE_RELEASE}/instalar-vigilante-mec-linux-x86_64"
 CONFIG = RAIZ / "privado" / "config_jose.json"
 SALIDA = RAIZ / "privado" / "instalar_vigilante_jose.sh"
 PAQUETE = RAIZ / "privado" / "Vigilante-MEC-Jose-completo.tar.gz"
-LEEME = """VIGILANTE MEC - cómo instalarlo
+LEEME = """VIGILANTE MEC - cómo instalarlo (Todo en Uno, sin descargas)
 
-Deja todos los archivos juntos en esta carpeta: la app ya viene incluida.
+Deja todos los archivos juntos en esta carpeta: la app y el navegador ya vienen incluidos.
 
 1. Haz doble clic en "Instalar Vigilante MEC".
    (Si no se abre: clic derecho > Propiedades > Permisos > marca "Permitir ejecutar
    el archivo como un programa", o clic derecho > "Ejecutar como un programa".)
 2. Lee el aviso, marca "Lo entiendo y acepto" y pulsa Instalar.
-3. Espera a que termine (si no tienes Chrome, lo baja solo).
+3. Espera unos segundos a que termine de copiar los archivos.
 4. La primera vez, inicia sesión en el MEC en la ventana de Chrome que se abre
    y abre tu trámite hasta el paso Agenda. Desde ahí sigue sola.
 
@@ -46,6 +48,7 @@ CONFIG_B64="__CONFIG__"
 DATOS="${XDG_DATA_HOME:-$HOME/.local/share}/vigilante-mec"
 APPDIR="$DATOS/app"
 EXE="$APPDIR/vigilante-mec"
+DIR_PROPIO="$(cd "$(dirname "$0")" && pwd)"
 
 cat <<'AVISO'
 
@@ -73,17 +76,23 @@ if [ "$(uname -m)" != "x86_64" ]; then
   echo "Este equipo no es de 64 bits (x86_64); avisa a Victor."; exit 1
 fi
 
-echo; echo "1/4  Bajando la app..."
-TMP="$(mktemp)"
-if command -v curl >/dev/null; then curl -fL --progress-bar "$URL" -o "$TMP"
-else wget -q --show-progress -O "$TMP" "$URL"; fi
+TMP=""
+if [ -f "$DIR_PROPIO/vigilante-mec-linux-x86_64.tar.gz" ]; then
+  PAQ="$DIR_PROPIO/vigilante-mec-linux-x86_64.tar.gz"
+else
+  echo; echo "1/4  Bajando la app..."
+  TMP="$(mktemp)"
+  if command -v curl >/dev/null; then curl -fL --retry 10 --retry-delay 3 --progress-bar "$URL" -o "$TMP"
+  else wget -q --tries=10 --show-progress -O "$TMP" "$URL"; fi
+  PAQ="$TMP"
+fi
 
 echo "2/4  Instalando..."
 pgrep -f "$APPDIR" >/dev/null 2>&1 && pkill -f "$APPDIR" || true
 mkdir -p "$DATOS"
 rm -rf "$APPDIR"; mkdir -p "$APPDIR"
-tar -xzf "$TMP" -C "$APPDIR" --strip-components=1
-rm -f "$TMP"
+tar -xzf "$PAQ" -C "$APPDIR" --strip-components=1
+[ -n "$TMP" ] && rm -f "$TMP"
 echo "$CONFIG_B64" | base64 -d > "$DATOS/config_instalador.json"
 chmod 600 "$DATOS/config_instalador.json"
 
@@ -114,8 +123,20 @@ for n in google-chrome google-chrome-stable chromium chromium-browser; do
   if [ -n "$r" ] && ! readlink -f "$r" | grep -q /snap/; then HAY_CHROME="$r"; break; fi
 done
 if [ -z "$HAY_CHROME" ]; then
-  echo "     No hay Chrome: bajo Chromium para la app (unos 150 MB)..."
-  "$EXE" --instalar-navegador
+  if [ -f "$DIR_PROPIO/navegador-linux-x86_64.tar.gz" ]; then
+    echo "     Instalando el navegador incluido..."
+    rm -rf "$DATOS/navegadores"; mkdir -p "$DATOS/navegadores"
+    tar -xzf "$DIR_PROPIO/navegador-linux-x86_64.tar.gz" -C "$DATOS/navegadores" --strip-components=1
+  else
+    echo "     No hay Chrome: bajo Chromium para la app (unos 150 MB)..."
+    "$EXE" --instalar-navegador
+  fi
+fi
+if ! "$EXE" --probar-navegador 2>/dev/null | grep -q NAVEGADOR_OK; then
+  if [ -f "$DIR_PROPIO/navegador-linux-x86_64.tar.gz" ] && [ ! -d "$DATOS/navegadores" ]; then
+    mkdir -p "$DATOS/navegadores"
+    tar -xzf "$DIR_PROPIO/navegador-linux-x86_64.tar.gz" -C "$DATOS/navegadores" --strip-components=1
+  fi
 fi
 if ! "$EXE" --probar-navegador 2>/dev/null | grep -q NAVEGADOR_OK; then
   echo "     Al navegador le faltan piezas del sistema. Te pedirá TU contraseña de Linux para instalarlas:"
@@ -130,6 +151,21 @@ echo
 echo "Listo. La app está en el menú de aplicaciones y en el escritorio (\"Vigilante MEC\")."
 echo "La primera vez inicia sesión en el MEC en la ventana de Chrome que se abre."
 '''
+
+
+def bajar(url):
+    for intento in range(1, 6):
+        try:
+            with urllib.request.urlopen(url, timeout=180) as r:
+                total = int(r.headers.get("Content-Length") or 0)
+                datos = r.read()
+                if not total or len(datos) == total:
+                    return datos
+        except Exception:
+            if intento == 5:
+                raise
+            time.sleep(3)
+    raise RuntimeError(f"No se pudo descargar {url}")
 
 
 def agregar(tar, nombre, datos, modo):
@@ -150,19 +186,24 @@ def main(config=CONFIG, salida=SALIDA, paquete=PAQUETE):
     print(f"Listo: {salida}")
 
     if paquete:
-        with urllib.request.urlopen(URL_INSTALADOR, timeout=120) as r:
-            instalador = r.read()
-        with urllib.request.urlopen(URL_LINUX, timeout=120) as r:
-            app = r.read()
+        print("Descargando instalador, app y navegador de la release para armar el paquete todo en uno...")
+        instalador = bajar(URL_INSTALADOR)
+        app = bajar(URL_LINUX)
+        navegador = bajar(URL_NAVEGADOR)
         with tarfile.open(paquete, "w:gz") as tar:
             carpeta = tarfile.TarInfo("Vigilante MEC")
             carpeta.type, carpeta.mode, carpeta.mtime = tarfile.DIRTYPE, 0o755, int(time.time())
             tar.addfile(carpeta)
             agregar(tar, "Vigilante MEC/Instalar Vigilante MEC", instalador, 0o755)
             agregar(tar, f"Vigilante MEC/{URL_LINUX.rsplit('/', 1)[1]}", app, 0o644)
+            agregar(tar, f"Vigilante MEC/{URL_NAVEGADOR.rsplit('/', 1)[1]}", navegador, 0o644)
             agregar(tar, "Vigilante MEC/config.vmec", datos.encode("ascii"), 0o600)
             agregar(tar, "Vigilante MEC/LEEME.txt", LEEME.encode("utf-8"), 0o644)
         print(f"Listo: {paquete}")
+        # Actualiza también Vigilante-MEC-Jose.tar.gz para que no quede ninguna copia vieja sin la app.
+        copia_corta = Path(paquete).parent / "Vigilante-MEC-Jose.tar.gz"
+        if copia_corta != Path(paquete):
+            shutil.copy2(paquete, copia_corta)
     print("Mándaselo a José por privado.")
 
 

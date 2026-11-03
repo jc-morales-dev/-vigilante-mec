@@ -8,6 +8,7 @@ el archivo config.vmec que se pone al lado. Instala por usuario, sin permisos de
     "Instalar Vigilante MEC" --sin-ventana --acepto   lo mismo por consola (pruebas automáticas)
 """
 import base64
+import http.client
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -26,7 +28,10 @@ certificados.configurar()
 APP = "Vigilante MEC"
 REPO = "jc-morales-dev/-vigilante-mec"
 PAQUETE_APP = "vigilante-mec-linux-x86_64.tar.gz"  # si está al lado del instalador, no se baja nada
+PAQUETE_NAVEGADOR = "navegador-linux-x86_64.tar.gz"  # Chromium incluido para no bajar 150 MB
 URL_APP = f"https://github.com/{REPO}/releases/download/lanzador-v1/{PAQUETE_APP}"
+INTENTOS_BAJADA = 5
+RECURSOS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATOS = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vigilante-mec"
 APPDIR = DATOS / "app"
 EXE = APPDIR / "vigilante-mec"
@@ -41,10 +46,37 @@ def carpeta_propia():
     return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
 
 
+def buscar_recurso(nombre):
+    """Busca un archivo al lado del instalador o, si lo abrieron sin descomprimir todo, en Descargas/Escritorio."""
+    for base in (carpeta_propia(), RECURSOS):
+        ruta = base / nombre
+        if ruta.exists():
+            return ruta
+    for d in ("Descargas", "Downloads", "Escritorio", "Desktop"):
+        c = Path.home() / d
+        if not c.is_dir():
+            continue
+        for sub in [c, *sorted(c.glob("*Vigilante*"))]:
+            if (sub / nombre).exists():
+                return sub / nombre
+        for archivo_tar in sorted(c.glob("Vigilante-MEC*.tar.gz"), reverse=True):
+            try:
+                with tarfile.open(archivo_tar) as t:
+                    for m in t.getmembers():
+                        if Path(m.name).name == nombre:
+                            tmp = Path(tempfile.mkstemp(suffix="-" + nombre)[1])
+                            with t.extractfile(m) as orig, tmp.open("wb") as dest:
+                                shutil.copyfileobj(orig, dest)
+                            return tmp
+            except Exception:
+                continue
+    return None
+
+
 def leer_config():
     for nombre in ("config.vmec", "config.json"):
-        ruta = carpeta_propia() / nombre
-        if ruta.exists():
+        ruta = buscar_recurso(nombre)
+        if ruta and ruta.exists():
             texto = ruta.read_text(encoding="utf-8").strip()
             try:
                 return json.loads(texto)
@@ -86,46 +118,64 @@ def navegador_ok():
 
 
 def bajar_app(paso, avance):
-    paso("Bajando la app…")
     tmp = Path(tempfile.mkstemp(suffix=".tar.gz")[1])
-    with urllib.request.urlopen(URL_APP, timeout=60) as r, tmp.open("wb") as f:
-        total = int(r.headers.get("Content-Length") or 0)
-        bajado = 0
-        while True:
-            trozo = r.read(1 << 16)
-            if not trozo:
-                break
-            f.write(trozo)
-            bajado += len(trozo)
-            if total:
-                avance(bajado * 50 // total)
-    return tmp
+    for intento in range(1, INTENTOS_BAJADA + 1):
+        paso("Bajando la app…" if intento == 1 else f"Se cortó la conexión. Reintento {intento} de {INTENTOS_BAJADA}…")
+        try:
+            with urllib.request.urlopen(URL_APP, timeout=60) as r, tmp.open("wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                bajado = 0
+                while True:
+                    trozo = r.read(1 << 16)
+                    if not trozo:
+                        break
+                    f.write(trozo)
+                    bajado += len(trozo)
+                    if total:
+                        avance(bajado * 50 // total)
+            if not total or bajado == total:
+                with tarfile.open(tmp) as t:
+                    t.getmembers()
+                return tmp
+            error = f"llegaron {bajado} de {total} bytes"
+        except (OSError, http.client.HTTPException, tarfile.TarError, EOFError) as e:
+            error = e
+        if intento < INTENTOS_BAJADA:
+            time.sleep(5)
+    tmp.unlink(missing_ok=True)
+    raise RuntimeError(f"No se pudo bajar la app: {error}. Prueba con otra red.")
 
 
-def instalar(cfg, icono_escritorio, arranque, paso, avance):
-    incluido = carpeta_propia() / PAQUETE_APP
-    paquete = incluido if incluido.exists() else bajar_app(paso, avance)
-
-    paso("Instalando…")
+def extraer_paquete(archivo, destino):
     try:
-        with tarfile.open(paquete) as t:
-            t.getmembers()  # un paquete dañado falla aquí, antes de tocar lo que ya esté instalado
+        with tarfile.open(archivo) as t:
+            miembros = t.getmembers()  # un paquete dañado falla aquí, antes de tocar lo que ya esté instalado
     except (tarfile.TarError, EOFError, OSError) as e:
-        raise RuntimeError(f"El paquete de la app está incompleto o dañado. Pide uno nuevo. ({e})")
-    if shutil.which("pkill"):
-        subprocess.run(["pkill", "-f", str(APPDIR)], capture_output=True)
-    DATOS.mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(APPDIR, ignore_errors=True)
-    APPDIR.mkdir(parents=True)
-    with tarfile.open(paquete) as t:
-        for m in t.getmembers():
-            partes = Path(m.name).parts[1:]  # quita la carpeta "vigilante-mec/" del paquete
+        raise RuntimeError(f"El paquete ({archivo.name}) está incompleto o dañado. Pide uno nuevo. ({e})")
+    shutil.rmtree(destino, ignore_errors=True)
+    destino.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archivo) as t:
+        for m in miembros:
+            partes = Path(m.name).parts[1:]  # quita la carpeta raíz del paquete
             if not partes:
                 continue
             m.name = str(Path(*partes))
-            t.extract(m, APPDIR)
+            if m.islnk() and len(Path(m.linkname).parts) > 1:
+                m.linkname = str(Path(*Path(m.linkname).parts[1:]))
+            t.extract(m, destino)
+
+
+def instalar(cfg, icono_escritorio, arranque, paso, avance):
+    incluido = buscar_recurso(PAQUETE_APP)
+    paquete = incluido if incluido else bajar_app(paso, avance)
+
+    paso("Instalando…")
+    if shutil.which("pkill"):
+        subprocess.run(["pkill", "-f", str(APPDIR)], capture_output=True)
+    DATOS.mkdir(parents=True, exist_ok=True)
+    extraer_paquete(paquete, APPDIR)
     if paquete != incluido:
-        paquete.unlink()
+        paquete.unlink(missing_ok=True)
     config = DATOS / "config_instalador.json"
     config.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
     os.chmod(config, 0o600)
@@ -153,11 +203,23 @@ def instalar(cfg, icono_escritorio, arranque, paso, avance):
         inicio.unlink(missing_ok=True)
     avance(65)
 
+    nav_incluido = buscar_recurso(PAQUETE_NAVEGADOR)
     if not hay_chrome():
-        paso("Bajando el navegador (unos 150 MB, puede tardar)…")
-        subprocess.run([str(EXE), "--instalar-navegador"], capture_output=True)
+        if nav_incluido:
+            paso("Instalando el navegador incluido…")
+            extraer_paquete(nav_incluido, DATOS / "navegadores")
+        else:
+            paso("Bajando el navegador (unos 150 MB, puede tardar)…")
+            subprocess.run([str(EXE), "--instalar-navegador"], capture_output=True)
     avance(85)
     paso("Comprobando el navegador…")
+    if not navegador_ok():
+        if nav_incluido and not (DATOS / "navegadores").exists():
+            paso("Instalando el navegador incluido…")
+            extraer_paquete(nav_incluido, DATOS / "navegadores")
+        elif not (DATOS / "navegadores").exists():
+            paso("Bajando el navegador (unos 150 MB, puede tardar)…")
+            subprocess.run([str(EXE), "--instalar-navegador"], capture_output=True)
     if not navegador_ok():
         paso("Faltan piezas del sistema: escribe tu contraseña de Linux en la ventana que aparece…")
         if shutil.which("pkexec"):
