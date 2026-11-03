@@ -67,7 +67,7 @@ jobs:
             done
           }
           # Fedora: sin /usr/lib/ssl, donde el instalador antiguo fallaba (usa los del sistema).
-          probar fedora:latest 'test ! -e /usr/lib/ssl' ' /etc/'
+          probar fedora:latest 'test ! -e /usr/lib/ssl' /etc/
           # Debian mínimo: sin ningún certificado en el sistema (usa los que trae la app).
           probar debian:stable-slim 'test ! -e /etc/ssl/certs/ca-certificates.crt' certifi/cacert.pem
 
