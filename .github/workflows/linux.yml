@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-          pip install playwright pyinstaller pillow
+          pip install playwright pyinstaller pillow certifi
           python -c "import tkinter; print('tk', tkinter.TkVersion)"
 
       - name: Construir
@@ -40,11 +40,12 @@ jobs:
                    calendar locale platform webbrowser queue socket ssl; do EXTRA="$EXTRA --hidden-import $m"; done
           pyinstaller --noconfirm --clean --windowed --name vigilante-mec \
             --add-data "codigo:codigo" --add-data "codigo/icono.png:." \
-            --paths codigo --hidden-import app --hidden-import motor $EXTRA \
+            --paths codigo --hidden-import app --hidden-import motor --collect-data certifi $EXTRA \
             lanzador/lanzador.py
           tar -czf vigilante-mec-linux-x86_64.tar.gz -C dist vigilante-mec
           # Instalador con ventana (genérico: los datos de cada persona van en config.vmec al lado).
-          pyinstaller --noconfirm --onefile --windowed --name instalar-vigilante-mec lanzador/instalador_linux.py
+          pyinstaller --noconfirm --onefile --windowed --name instalar-vigilante-mec --collect-data certifi \
+            lanzador/instalador_linux.py
           cp dist/instalar-vigilante-mec instalar-vigilante-mec-linux-x86_64
 
       - name: Probar en un Linux limpio (bajar Chromium y abrirlo)
@@ -55,6 +56,20 @@ jobs:
           sudo -E dist/vigilante-mec/vigilante-mec --instalar-dependencias
           xvfb-run -a dist/vigilante-mec/vigilante-mec --probar-navegador | tee prueba.txt
           grep -q NAVEGADOR_OK prueba.txt
+
+      - name: Probar HTTPS en otras distros (antes de publicar)
+        run: |
+          probar() {  # $1 = imagen, $2 = comprobación previa, $3 = de dónde deben salir los certificados
+            for binario in dist/vigilante-mec/vigilante-mec dist/instalar-vigilante-mec; do
+              echo "== $1: $binario"
+              docker run --rm -v "$PWD/dist:/w/dist:ro" -w /w "$1" sh -c "$2 && $binario --probar-conexion" | tee salida.txt
+              grep -q "CONEXION_OK .*$3" salida.txt
+            done
+          }
+          # Fedora: sin /usr/lib/ssl, donde el instalador antiguo fallaba (usa los del sistema).
+          probar fedora:latest 'test ! -e /usr/lib/ssl' ' /etc/'
+          # Debian mínimo: sin ningún certificado en el sistema (usa los que trae la app).
+          probar debian:stable-slim 'test ! -e /etc/ssl/certs/ca-certificates.crt' certifi/cacert.pem
 
       - name: Publicar
         env:

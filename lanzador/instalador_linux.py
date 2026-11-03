@@ -19,6 +19,10 @@ import threading
 import urllib.request
 from pathlib import Path
 
+import certificados
+
+certificados.configurar()
+
 APP = "Vigilante MEC"
 REPO = "jc-morales-dev/-vigilante-mec"
 URL_APP = f"https://github.com/{REPO}/releases/download/lanzador-v1/vigilante-mec-linux-x86_64.tar.gz"
@@ -237,4 +241,7 @@ def ventana():
 
 
 if __name__ == "__main__":
+    if "--probar-conexion" in sys.argv:
+        certificados.probar([URL_APP])
+        sys.exit(0)
     sys.exit(sin_ventana() if "--sin-ventana" in sys.argv else ventana())

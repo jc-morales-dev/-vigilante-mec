@@ -14,6 +14,7 @@ Uso:
     VigilanteMEC --desinstalar           quitar la app de este equipo
     VigilanteMEC --instalar-navegador    bajar Chromium (si no hay Chrome)
     VigilanteMEC --probar-navegador      comprobar que el navegador arranca
+    VigilanteMEC --probar-conexion       comprobar HTTPS con el servidor y con Telegram
 """
 import hashlib
 import importlib.util
@@ -28,6 +29,10 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+
+import certificados
+
+certificados.configurar()
 
 APP = "Vigilante MEC"
 LANZADOR_VERSION = 1
@@ -380,6 +385,9 @@ def main():
     DATOS.mkdir(parents=True, exist_ok=True)
     fusionar_config_instalador()
     argv = sys.argv[1:]
+    if "--probar-conexion" in argv:
+        certificados.probar([MANIFEST_URL, "https://api.telegram.org/"])
+        return
     if "--instalar-navegador" in argv:
         sys.exit(driver_playwright("install", "chromium"))
     if "--instalar-dependencias" in argv:
