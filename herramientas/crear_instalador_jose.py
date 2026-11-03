@@ -1,7 +1,7 @@
 """Genera los instaladores de Linux para José, con su config dentro. Llevan el token del bot:
 mándaselos por privado, nunca los subas al servidor.
 
-  privado/Vigilante-MEC-Jose.tar.gz       instalador con ventana (doble clic, sin comandos)
+  privado/Vigilante-MEC-Jose-completo.tar.gz   todo en uno: doble clic, sin comandos y sin bajar la app
   privado/instalar_vigilante_jose.sh      alternativa por terminal:  bash instalar_vigilante_jose.sh
 """
 import base64
@@ -20,8 +20,10 @@ URL_LINUX = f"{BASE_RELEASE}/vigilante-mec-linux-x86_64.tar.gz"
 URL_INSTALADOR = f"{BASE_RELEASE}/instalar-vigilante-mec-linux-x86_64"
 CONFIG = RAIZ / "privado" / "config_jose.json"
 SALIDA = RAIZ / "privado" / "instalar_vigilante_jose.sh"
-PAQUETE = RAIZ / "privado" / "Vigilante-MEC-Jose.tar.gz"
+PAQUETE = RAIZ / "privado" / "Vigilante-MEC-Jose-completo.tar.gz"
 LEEME = """VIGILANTE MEC - cómo instalarlo
+
+Deja todos los archivos juntos en esta carpeta: la app ya viene incluida.
 
 1. Haz doble clic en "Instalar Vigilante MEC".
    (Si no se abre: clic derecho > Propiedades > Permisos > marca "Permitir ejecutar
@@ -150,11 +152,14 @@ def main(config=CONFIG, salida=SALIDA, paquete=PAQUETE):
     if paquete:
         with urllib.request.urlopen(URL_INSTALADOR, timeout=120) as r:
             instalador = r.read()
+        with urllib.request.urlopen(URL_LINUX, timeout=120) as r:
+            app = r.read()
         with tarfile.open(paquete, "w:gz") as tar:
             carpeta = tarfile.TarInfo("Vigilante MEC")
             carpeta.type, carpeta.mode, carpeta.mtime = tarfile.DIRTYPE, 0o755, int(time.time())
             tar.addfile(carpeta)
             agregar(tar, "Vigilante MEC/Instalar Vigilante MEC", instalador, 0o755)
+            agregar(tar, f"Vigilante MEC/{URL_LINUX.rsplit('/', 1)[1]}", app, 0o644)
             agregar(tar, "Vigilante MEC/config.vmec", datos.encode("ascii"), 0o600)
             agregar(tar, "Vigilante MEC/LEEME.txt", LEEME.encode("utf-8"), 0o644)
         print(f"Listo: {paquete}")

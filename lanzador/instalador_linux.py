@@ -25,7 +25,8 @@ certificados.configurar()
 
 APP = "Vigilante MEC"
 REPO = "jc-morales-dev/-vigilante-mec"
-URL_APP = f"https://github.com/{REPO}/releases/download/lanzador-v1/vigilante-mec-linux-x86_64.tar.gz"
+PAQUETE_APP = "vigilante-mec-linux-x86_64.tar.gz"  # si está al lado del instalador, no se baja nada
+URL_APP = f"https://github.com/{REPO}/releases/download/lanzador-v1/{PAQUETE_APP}"
 DATOS = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vigilante-mec"
 APPDIR = DATOS / "app"
 EXE = APPDIR / "vigilante-mec"
@@ -84,7 +85,7 @@ def navegador_ok():
         return False
 
 
-def instalar(cfg, icono_escritorio, arranque, paso, avance):
+def bajar_app(paso, avance):
     paso("Bajando la app…")
     tmp = Path(tempfile.mkstemp(suffix=".tar.gz")[1])
     with urllib.request.urlopen(URL_APP, timeout=60) as r, tmp.open("wb") as f:
@@ -98,20 +99,33 @@ def instalar(cfg, icono_escritorio, arranque, paso, avance):
             bajado += len(trozo)
             if total:
                 avance(bajado * 50 // total)
+    return tmp
+
+
+def instalar(cfg, icono_escritorio, arranque, paso, avance):
+    incluido = carpeta_propia() / PAQUETE_APP
+    paquete = incluido if incluido.exists() else bajar_app(paso, avance)
 
     paso("Instalando…")
-    subprocess.run(["pkill", "-f", str(APPDIR)], capture_output=True)
+    try:
+        with tarfile.open(paquete) as t:
+            t.getmembers()  # un paquete dañado falla aquí, antes de tocar lo que ya esté instalado
+    except (tarfile.TarError, EOFError, OSError) as e:
+        raise RuntimeError(f"El paquete de la app está incompleto o dañado. Pide uno nuevo. ({e})")
+    if shutil.which("pkill"):
+        subprocess.run(["pkill", "-f", str(APPDIR)], capture_output=True)
     DATOS.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(APPDIR, ignore_errors=True)
     APPDIR.mkdir(parents=True)
-    with tarfile.open(tmp) as t:
+    with tarfile.open(paquete) as t:
         for m in t.getmembers():
             partes = Path(m.name).parts[1:]  # quita la carpeta "vigilante-mec/" del paquete
             if not partes:
                 continue
             m.name = str(Path(*partes))
             t.extract(m, APPDIR)
-    tmp.unlink()
+    if paquete != incluido:
+        paquete.unlink()
     config = DATOS / "config_instalador.json"
     config.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
     os.chmod(config, 0o600)
@@ -146,7 +160,8 @@ def instalar(cfg, icono_escritorio, arranque, paso, avance):
     paso("Comprobando el navegador…")
     if not navegador_ok():
         paso("Faltan piezas del sistema: escribe tu contraseña de Linux en la ventana que aparece…")
-        subprocess.run(["pkexec", str(EXE), "--instalar-dependencias"], capture_output=True)
+        if shutil.which("pkexec"):
+            subprocess.run(["pkexec", str(EXE), "--instalar-dependencias"], capture_output=True)
         if not navegador_ok():
             raise RuntimeError("El navegador no arranca. Instala Google Chrome (google.com/chrome) y abre "
                                "Vigilante MEC desde el menú de aplicaciones.")

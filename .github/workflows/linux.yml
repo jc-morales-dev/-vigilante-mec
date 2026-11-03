@@ -71,6 +71,25 @@ jobs:
           # Debian mínimo: sin ningún certificado en el sistema (usa los que trae la app).
           probar debian:stable-slim 'test ! -e /etc/ssl/certs/ca-certificates.crt' certifi/cacert.pem
 
+      - name: Probar el paquete todo en uno (Fedora sin internet, antes de publicar)
+        run: |
+          mkdir -p /tmp/todo
+          cp instalar-vigilante-mec-linux-x86_64 "/tmp/todo/Instalar Vigilante MEC"
+          cp vigilante-mec-linux-x86_64.tar.gz /tmp/todo/
+          echo '{"telegram_token": "", "chats_avisos": [], "chat_dueno": "", "rol": "respaldo"}' | base64 -w0 > /tmp/todo/config.vmec
+          # Sin red ni Chrome el paso del navegador no puede pasar: se comprueba que la app quedó instalada.
+          docker run --rm --network none -v /tmp/todo:/p:ro fedora:latest sh -c '
+            D=/root/.local/share/vigilante-mec
+            timeout 400 "/p/Instalar Vigilante MEC" --sin-ventana --acepto > /tmp/salida.txt 2>&1
+            cat /tmp/salida.txt
+            ! grep -q "Bajando la app" /tmp/salida.txt &&
+              grep -q "Comprobando el navegador" /tmp/salida.txt &&
+              test -x "$D/app/vigilante-mec" &&
+              { test -f "$D/config.json" || test -f "$D/config_instalador.json"; } &&
+              test -f /root/.local/share/applications/vigilante-mec.desktop &&
+              echo PAQUETE_OK' | tee todo.txt
+          grep -q PAQUETE_OK todo.txt
+
       - name: Publicar
         env:
           GH_TOKEN: ${{ github.token }}

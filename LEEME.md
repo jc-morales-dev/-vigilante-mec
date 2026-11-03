@@ -27,7 +27,8 @@ Este repositorio es el **servidor de actualizaciones**: las apps instaladas leen
 - **`eliminar_en_todos.bat`**: desactiva la app. Cada equipo la quita junto con sus datos.
 - **`reactivar.bat`**: vuelve a permitirla (necesario antes de reinstalar tras eliminarla).
 - **`construir_instalador_windows.bat`**: genera `privado/VigilanteMEC-Setup-Victor.exe`.
-- **`crear_instalador_jose.bat`**: genera `privado/instalar_vigilante_jose.sh` (Linux).
+- **`crear_instalador_jose.bat`**: genera `privado/Vigilante-MEC-Jose-completo.tar.gz` (Linux, todo en uno: no baja la app)
+  y `privado/instalar_vigilante_jose.sh` (por terminal).
 
 `privado/` nunca se sube: los instaladores personales llevan el token del bot.
 
